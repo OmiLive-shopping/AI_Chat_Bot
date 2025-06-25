@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>OMI Live Chatbot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+
+  <!-- Header Bar -->
+  <header class="chat-header">
+    <div class="header-left">OmiBot | Omi Live</div>
+    <button class="new-chat-btn" onclick="location.reload()">New Chat</button>
+  </header>
+
+  <!-- Chat UI container -->
+  <main class="chat-shell" id="chat-shell">
+    <h1 class="welcome" id="welcome">What's on your mind today?</h1>
+
+    <div id="chat-box" class="chat-box"></div>
+
+    <div class="input-bar" id="input-bar">
+      <textarea id="user-input" rows="1" placeholder="Ask a question" onkeydown="handleKey(event)"></textarea>
+      <button class="send-btn" onclick="sendMessage()">
+        <svg viewBox="0 0 24 24" width="22" height="22">
+          <path d="M4 12h14M13 5l7 7-7 7"
+                fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round"
+                stroke-linejoin="round" />
+        </svg>
+      </button>
+    </div>
+  </main>
+
+  <!-- JavaScript -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const ta = document.getElementById('user-input');
+      const shell = document.getElementById('chat-shell');
+
+      ta.addEventListener('input', () => {
+        ta.style.height = 'auto';
+        ta.style.height = ta.scrollHeight + 'px';
+      });
+
+      window.handleKey = function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      };
+
+      window.sendMessage = function () {
+        const input = document.getElementById("user-input");
+        const message = input.value.trim();
+        if (!message) return;
+
+        document.body.classList.add("active-chat");
+        document.getElementById("welcome").style.display = "none";
+
+        const chatBox = document.getElementById("chat-box");
+        chatBox.innerHTML += `<div class="msg user">🧑‍💻 ${message}</div>`;
+        input.value = "";
+        input.style.height = 'auto';
+        chatBox.scrollTop = chatBox.scrollHeight;
+
+        fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: message })
+        })
+        .then(res => res.json())
+        .then(data => {
+          chatBox.innerHTML += `<div class="msg bot">🤖 ${data.answer}</div>`;
+          chatBox.scrollTop = chatBox.scrollHeight;
+        })
+        .catch(err => {
+          chatBox.innerHTML += `<div class="msg bot">⚠️ Error: ${err}</div>`;
+        });
+      };
+    });
+  </script>
+</body>
+</html>
