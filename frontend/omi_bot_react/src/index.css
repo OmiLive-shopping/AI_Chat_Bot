@@ -1,4 +1,4 @@
-/* ---------- CORE LAYOUT ---------- */
+/* ---------- GLOBAL RESET ---------- */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -12,7 +12,7 @@ body {
   background: #f7f7f8;
 }
 
-/* ---------- TOGGLE BUTTON ---------- */
+/* ---------- CHAT TOGGLE BUTTON ---------- */
 #chat-toggle {
   position: fixed;
   bottom: 30px;
@@ -33,7 +33,6 @@ body {
 
 /* ---------- CHAT POPUP ---------- */
 #chat-popup {
-  display: none;
   position: fixed;
   bottom: 100px;
   right: 20px;
@@ -45,6 +44,7 @@ body {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   z-index: 999;
+  display: flex;
   flex-direction: column;
   backdrop-filter: blur(2px);
 }
@@ -64,7 +64,7 @@ body {
 
 /* ---------- HEADER BAR ---------- */
 .chat-header {
-  background: rgba(79, 70, 229, 0.9);
+  background: rgba(79, 70, 229, 0.95);
   color: white;
   height: 60px;
   display: flex;
@@ -73,7 +73,6 @@ body {
   padding: 0 20px;
   font-size: 1.1rem;
   font-weight: 500;
-  z-index: 100;
 }
 
 .chat-header-right {
@@ -107,36 +106,35 @@ body {
   background: #e0e7ff;
 }
 
-/* ---------- CHAT CONTAINER ---------- */
+/* ---------- MAIN CHAT CONTAINER ---------- */
 .chat-shell {
-  background-color: rgba(255, 255, 255, 0.85);
+  background-color: rgba(255, 255, 255, 0.88);
   flex: 1;
   display: flex;
   flex-direction: column;
   padding: 20px;
-  height: calc(100% - 60px); /* subtract header height */
+  height: calc(100% - 60px);
   overflow: hidden;
-  transition: all 0.3s ease;
 }
 
-/* ---------- INITIAL CENTERED LAYOUT ---------- */
+/* ---------- INITIAL MESSAGE ---------- */
 .welcome {
   text-align: center;
   font-weight: 500;
-  font-size: 2rem;
+  font-size: 1.9rem;
+  margin-top: 80px;
   margin-bottom: 30px;
   color: #444;
-  transition: all 0.3s ease;
 }
 
-/* ---------- CHAT BOX ---------- */
+/* ---------- CHAT BOX (MESSAGE SCROLLER) ---------- */
 .chat-box {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 0 4px 6px 4px;
+  gap: 12px;
+  padding: 0 6px 8px 6px;
   min-height: 0;
 }
 
@@ -159,9 +157,9 @@ body {
 
 .msg.bot {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   color: #111;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 /* ---------- TYPING INDICATOR ---------- */
@@ -181,25 +179,21 @@ body {
 }
 
 @keyframes pulse {
-  0% {
-    opacity: 0.3;
-  }
-  50% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0.3;
-  }
+  0% { opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { opacity: 0.3; }
 }
 
 /* ---------- INPUT BAR ---------- */
 .input-bar {
-  background: #e5e7eb;
+  background: #ffffffee; /* Remove shading */
+  border: 1px solid #ccc;
   border-radius: 12px;
   padding: 8px;
   display: flex;
   align-items: center;
   transition: all 0.3s ease;
+  margin-top: 10px;
 }
 
 textarea {
@@ -238,7 +232,32 @@ textarea {
   transform: scale(0.98);
 }
 
-/* ---------- SCROLLBAR STYLING ---------- */
+/* ---------- EMAIL PROMPT ---------- */
+.email-prompt {
+  margin: auto;
+  text-align: center;
+}
+
+.email-prompt input {
+  padding: 10px;
+  width: 80%;
+  max-width: 300px;
+  margin-top: 10px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+}
+
+.email-prompt button {
+  margin-top: 12px;
+  padding: 6px 16px;
+  background-color: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* ---------- SCROLLBAR ---------- */
 .chat-box::-webkit-scrollbar {
   width: 6px;
 }
@@ -252,7 +271,7 @@ textarea {
   border-radius: 3px;
 }
 
-/* ---------- MOBILE RESPONSIVENESS ---------- */
+/* ---------- RESPONSIVE MOBILE ---------- */
 @media (max-width: 600px) {
   #chat-popup {
     bottom: 80px;
@@ -267,6 +286,7 @@ textarea {
 
   .welcome {
     font-size: 1.6rem;
+    margin-top: 60px;
     margin-bottom: 20px;
   }
 
@@ -283,4 +303,3 @@ textarea {
     padding: 8px 10px;
   }
 }
-

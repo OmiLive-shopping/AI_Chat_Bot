@@ -7,7 +7,16 @@ export default function App() {
 
   return (
     <>
-      <button id="chat-toggle" onClick={() => setIsOpen(true)}>💬</button>
+      {!isOpen && (
+        <button
+          id="chat-toggle"
+          className="chat-toggle"
+          onClick={() => setIsOpen(true)}
+        >
+          💬
+        </button>
+      )}
+
       {isOpen && <ChatPopup onClose={() => setIsOpen(false)} />}
     </>
   );

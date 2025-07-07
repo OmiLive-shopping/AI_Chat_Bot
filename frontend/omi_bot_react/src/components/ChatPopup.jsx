@@ -1,4 +1,3 @@
-// src/components/ChatPopup.jsx
 import React, { useState, useRef, useEffect } from "react";
 import ChatMessage from "./ChatMessage";
 
@@ -6,6 +5,8 @@ export default function ChatPopup({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [email, setEmail] = useState(localStorage.getItem("userEmail") || "");
+  const [emailSubmitted, setEmailSubmitted] = useState(!!localStorage.getItem("userEmail"));
   const chatBoxRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -19,16 +20,12 @@ export default function ChatPopup({ onClose }) {
     const message = input.trim();
     if (!message) return;
 
-    console.log("Sending message:", message);
-
     const newMessages = [...messages, { type: "user", text: message }];
     setMessages([...newMessages, { type: "bot", text: "🤖 OmiBot is thinking..." }]);
     setInput("");
 
     try {
       const res = await fetch("http://localhost:8000/chat", {
-        // If Vite proxy doesn't work, uncomment this instead:
-        // const res = await fetch("http://localhost:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
@@ -48,6 +45,27 @@ export default function ChatPopup({ onClose }) {
         ...newMessages,
         { type: "bot", text: `⚠️ Error: ${err.message}` },
       ]);
+    }
+  };
+
+  const handleEmailSubmit = async () => {
+    const trimmed = email.trim();
+    const isValid = trimmed.includes("@") && (trimmed.endsWith(".com") || trimmed.endsWith(".edu"));
+    if (!isValid) {
+      alert("Please enter a valid email ending in .com or .edu");
+      return;
+    }
+
+    try {
+      await fetch("http://localhost:8000/register-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmed }),
+      });
+      localStorage.setItem("userEmail", trimmed);
+      setEmailSubmitted(true);
+    } catch (err) {
+      console.error("Failed to register email:", err);
     }
   };
 
@@ -77,42 +95,89 @@ export default function ChatPopup({ onClose }) {
       </header>
 
       <main className="chat-shell">
-        {messages.length === 0 && (
-          <h1 className="welcome">What's on your mind today?</h1>
-        )}
-
-        <div className="chat-box" id="chat-box" ref={chatBoxRef}>
-          {messages.map((msg, idx) => (
-            <ChatMessage key={idx} type={msg.type} text={msg.text} />
-          ))}
-        </div>
-
-        <div className="input-bar">
-          <textarea
-            rows="1"
-            placeholder="Ask a question"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-          />
-          <button className="send-btn" onClick={handleSend}>
-            <svg viewBox="0 0 24 24" width="22" height="22">
-              <path
-                d="M4 12h14M13 5l7 7-7 7"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+        {!emailSubmitted ? (
+          <div className="email-prompt">
+            <p>Please enter your email to begin:</p>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@domain.com"
+            />
+            <br />
+            <button onClick={handleEmailSubmit}>Submit</button>
+          </div>
+        ) : messages.length === 0 ? (
+          <div style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "center"
+          }}>
+            <h1 className="welcome">What's on your mind today?</h1>
+            <div className="input-bar">
+              <textarea
+                rows="1"
+                placeholder="Ask a question"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
               />
-            </svg>
-          </button>
-        </div>
+              <button className="send-btn" onClick={handleSend}>
+                <svg viewBox="0 0 24 24" width="22" height="22">
+                  <path
+                    d="M4 12h14M13 5l7 7-7 7"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="chat-box" ref={chatBoxRef}>
+              {messages.map((msg, idx) => (
+                <ChatMessage key={idx} type={msg.type} text={msg.text} />
+              ))}
+            </div>
+            <div className="input-bar">
+              <textarea
+                rows="1"
+                placeholder="Ask a question"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+              />
+              <button className="send-btn" onClick={handleSend}>
+                <svg viewBox="0 0 24 24" width="22" height="22">
+                  <path
+                    d="M4 12h14M13 5l7 7-7 7"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );

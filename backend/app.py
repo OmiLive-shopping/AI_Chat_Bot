@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify, session
 from rag_chain import get_rag_response
 from flask_cors import CORS
 import traceback
+import csv
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -16,26 +18,52 @@ def index():
 def health():
     return "OK", 200
 
+@app.route('/register-email', methods=['POST'])
+def register_email():
+    try:
+        data = request.get_json()
+        email = data.get("email", "").strip()
+
+        if not email or "@" not in email or not (email.endswith(".com") or email.endswith(".edu")):
+            return jsonify({"status": "invalid"}), 400
+
+        os.makedirs("data", exist_ok=True)
+        with open("data/user_emails.csv", "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([email])
+
+        print(f"📩 New user email registered: {email}")
+        return jsonify({"status": "success"})
+    except Exception as e:
+        print(f"[ERROR] Saving email: {e}")
+        traceback.print_exc()
+        return jsonify({"status": "error"}), 500
+
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
         user_input = request.json.get("message", "")
-        print(f"Received message: {user_input}")
+        print(f"[DEBUG] Received message: {user_input}")
 
         if "history" not in session:
             session["history"] = []
 
         chat_history = session["history"]
-        answer = get_rag_response(user_input, chat_history)
-        print(f"Generated answer: {answer}")
 
+        answer = get_rag_response(user_input, chat_history)
+
+        print(f"[DEBUG] Answer: {answer}")
+
+        # Append user and assistant messages to chat history for context
         chat_history.append({"role": "user", "content": user_input})
         chat_history.append({"role": "assistant", "content": answer})
+
+        # Update session
         session["history"] = chat_history
 
         return jsonify({"answer": answer})
     except Exception as e:
-        print(f"Error in /chat: {e}")
+        print(f"[ERROR] in /chat route: {e}")
         traceback.print_exc()
         return jsonify({"answer": "⚠️ Error occurred."}), 500
 
