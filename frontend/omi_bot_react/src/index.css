@@ -127,6 +127,14 @@ body {
   color: #444;
 }
 
+.chat-intro {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
 /* ---------- CHAT BOX (MESSAGE SCROLLER) ---------- */
 .chat-box {
   flex: 1;
@@ -186,7 +194,7 @@ body {
 
 /* ---------- INPUT BAR ---------- */
 .input-bar {
-  background: #ffffffee; /* Remove shading */
+  background: #ffffffee;
   border: 1px solid #ccc;
   border-radius: 12px;
   padding: 8px;
@@ -194,6 +202,11 @@ body {
   align-items: center;
   transition: all 0.3s ease;
   margin-top: 10px;
+}
+
+.input-bar.wide-input {
+  width: 70%;
+  margin: auto;
 }
 
 textarea {
@@ -204,8 +217,10 @@ textarea {
   padding: 10px 12px;
   font-size: 1rem;
   outline: none;
-  max-height: 200px;
   line-height: 1.5;
+  overflow-y: auto;
+  max-height: 200px;
+  min-height: 38px;
 }
 
 .send-btn {
@@ -303,3 +318,13 @@ textarea {
     padding: 8px 10px;
   }
 }
+
+.msg.bot {
+  animation: fadeIn 0.4s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+

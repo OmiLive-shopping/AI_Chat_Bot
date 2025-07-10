@@ -2,6 +2,7 @@ import os
 import re
 import traceback
 import warnings
+import time
 from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -22,14 +23,20 @@ load_dotenv()
 fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
 print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(fireworks_api_key))
 
-# Load and process FAQ
-loader = TextLoader("data/omi_faq.txt", encoding="utf-8")
-docs = loader.load()
+# === Load and process both FAQ and Knowledge Base ===
+loader_faq = TextLoader("data/omi_faq.txt", encoding="utf-8")
+docs_faq = loader_faq.load()
 
+loader_kb = TextLoader("data/omilive_knowledge_base.txt", encoding="utf-8")
+docs_kb = loader_kb.load()
+
+all_docs = docs_faq + docs_kb
+
+# === Chunk documents ===
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-documents = splitter.split_documents(docs)
+documents = splitter.split_documents(all_docs)
 
-# Embedding & Vector Store
+# === Embeddings and Vector DB ===
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-mpnet-base-v2",
     model_kwargs={"device": "cpu"},
@@ -38,10 +45,7 @@ embedding_model = HuggingFaceEmbeddings(
 db = FAISS.from_documents(documents, embedding_model)
 retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 2})
 
-# Chat memory
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-# Fireworks DeepSeek LLM
+# === LLM Setup ===
 llm = ChatFireworks(
     model="accounts/fireworks/models/deepseek-v3",
     api_key=fireworks_api_key,
@@ -49,10 +53,9 @@ llm = ChatFireworks(
     max_tokens=1024
 )
 
-# Greeting detection
-greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afternoon", "how are you"]
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-# Prompts
+# === Prompts ===
 CONDENSE_PROMPT = PromptTemplate.from_template(
     """You are a helpful AI that rephrases follow-up questions into standalone questions.
 
@@ -79,16 +82,16 @@ Answer:"""
 CLASSIFY_PROMPT = PromptTemplate.from_template(
     """You are a helpful assistant for OMI Live.
 
-Determine if the following user question is related to OMI Live, its features, brands (like Siplit), livestreams, eco-conscious shopping, or anything mentioned in the FAQ.
+Determine if the user question relates to OMI Live’s mission, livestream platform, eco-friendly brands, shopping practices, FAQ content, or educational content in the internal knowledge base — including hair care, skincare, body care, sustainable living, food tips, eco-friendly products, tampons, bees, and bamboo.
 
-Even if the question is vague or short (e.g., "By founders?", "Who started it?", "What about them?"), consider it related if it implies interest in OMI Live's leadership, mission, or platform.
+Even if the question is vague or short (e.g., "hair issues?", "eco laundry?"), consider it related if the topic is found in the FAQ or internal knowledge base.
 
 Question: {question}
 
 Answer with only "yes" or "no"."""
 )
 
-# Build chains
+# === Chains ===
 qa_chain = ConversationalRetrievalChain.from_llm(
     llm=llm,
     retriever=retriever,
@@ -98,7 +101,6 @@ qa_chain = ConversationalRetrievalChain.from_llm(
     return_source_documents=False
 )
 
-# Wrap LLM classification prompt
 def classify_question(inputs: dict) -> dict:
     response = llm.invoke(CLASSIFY_PROMPT.format(**inputs))
     print(f"[DEBUG] Raw classification response: {response}")
@@ -106,11 +108,13 @@ def classify_question(inputs: dict) -> dict:
 
 classifier_chain = RunnableLambda(classify_question)
 
-# Utility function
+# === Utility ===
 def clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", text.lower()).strip()
 
-# Main RAG function
+greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afternoon", "how are you"]
+
+# === Main Response Function ===
 def get_rag_response(question: str, chat_history: list) -> str:
     cleaned_q = clean_text(question)
     print(f"[DEBUG] Cleaned Question: {cleaned_q}")
@@ -152,9 +156,10 @@ def get_rag_response(question: str, chat_history: list) -> str:
     if any(p in low_answer for p in vague_phrases) and len(cleaned_q.split()) <= 5:
         return "Could you please clarify your question about the founders or OMI Live?"
 
+    time.sleep(1.0)  # Simulate processing delay
     return answer
 
-# Optional test
+# === Optional test ===
 if __name__ == "__main__":
     print("🔍 Testing LLM connectivity...")
     try:
