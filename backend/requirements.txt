@@ -10,4 +10,5 @@ sentence-transformers
 faiss-cpu
 fireworks-ai
 langchain-huggingface
-torch==2.7.1+cpu
+torch==2.7.1
+
