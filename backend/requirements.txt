@@ -10,6 +10,7 @@ langchain-huggingface
 langchain-fireworks
 
 sentence-transformers==2.2.2
+huggingface-hub==0.16.4
 faiss-cpu
 fireworks-ai
 torch==2.7.1
