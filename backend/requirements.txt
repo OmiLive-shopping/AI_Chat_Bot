@@ -1,0 +1,11 @@
+flask
+flask-cors
+python-dotenv
+langchain
+langchain-community
+langchain-fireworks
+langchain-core
+huggingface-hub
+sentence-transformers
+faiss-cpu
+fireworks-ai
