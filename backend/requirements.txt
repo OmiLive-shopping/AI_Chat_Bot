@@ -8,8 +8,8 @@ langchain-core
 langchain-huggingface
 langchain-fireworks
 
-sentence-transformers==2.2.2
-huggingface-hub==0.16.4
+sentence-transformers==2.5.1
+huggingface-hub>=0.23.0
 faiss-cpu==1.7.4
 fireworks-ai
-torch==2.7.1
+torch==2.2.2
