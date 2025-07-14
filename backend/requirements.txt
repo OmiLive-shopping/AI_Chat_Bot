@@ -13,3 +13,4 @@ huggingface-hub>=0.23.0
 faiss-cpu==1.7.4
 fireworks-ai
 torch==2.2.2
+numpy<2
