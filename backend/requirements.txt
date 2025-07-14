@@ -2,21 +2,14 @@ flask
 flask-cors
 python-dotenv
 
-# LangChain core and community tools
 langchain
 langchain-community
 langchain-core
 langchain-huggingface
 langchain-fireworks
 
-# Embeddings and vector search
 sentence-transformers==2.2.2
-faiss-cpu
 huggingface-hub==0.14.1
-
-# LLM and API integrations
+faiss-cpu
 fireworks-ai
-
-# PyTorch (CPU-compatible default build)
 torch==2.7.1
-
