@@ -54,11 +54,9 @@ def chat():
 
         print(f"[DEBUG] Answer: {answer}")
 
-        # Append user and assistant messages to chat history for context
         chat_history.append({"role": "user", "content": user_input})
         chat_history.append({"role": "assistant", "content": answer})
 
-        # Update session
         session["history"] = chat_history
 
         return jsonify({"answer": answer})
@@ -68,5 +66,6 @@ def chat():
         return jsonify({"answer": "⚠️ Error occurred."}), 500
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))  # 👈 This line ensures compatibility with Render
     print("🚀 Starting Flask server...")
-    app.run(debug=True, host="0.0.0.0", port=8000)
+    app.run(debug=True, host="0.0.0.0", port=port)
