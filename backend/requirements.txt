@@ -2,15 +2,16 @@ flask
 flask-cors
 python-dotenv
 
-langchain
-langchain-community
-langchain-core
-langchain-huggingface
-langchain-fireworks
+langchain==0.3.26
+langchain-community==0.3.27
+langchain-core==0.3.68
+langchain-huggingface==0.3.0
+langchain-fireworks==0.3.0
 
 sentence-transformers==2.5.1
 huggingface-hub>=0.23.0
 faiss-cpu==1.7.4
-fireworks-ai
+fireworks-ai==0.18.0
+
 torch==2.2.2
 numpy<2
