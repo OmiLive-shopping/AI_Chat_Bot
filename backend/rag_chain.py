@@ -14,38 +14,36 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain_core.runnables import RunnableLambda
 from langchain.memory import ConversationBufferMemory
 
-# Suppress tokenizer warnings
+# === Setup ===
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
-# Load API key from .env
+# Load Fireworks API key
 load_dotenv()
 fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
 print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(fireworks_api_key))
 
-# === Load and process both FAQ and Knowledge Base ===
-loader_faq = TextLoader("data/omi_faq.txt", encoding="utf-8")
-docs_faq = loader_faq.load()
-
-loader_kb = TextLoader("data/omilive_knowledge_base.txt", encoding="utf-8")
-docs_kb = loader_kb.load()
-
+# === Load Documents ===
+docs_faq = TextLoader("data/omi_faq.txt", encoding="utf-8").load()
+docs_kb = TextLoader("data/omilive_knowledge_base.txt", encoding="utf-8").load()
 all_docs = docs_faq + docs_kb
 
-# === Chunk documents ===
+# === Text Splitting ===
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 documents = splitter.split_documents(all_docs)
 
-# === Embeddings and Vector DB ===
+# === Embedding Setup (CPU-only) ===
 embedding_model = HuggingFaceEmbeddings(
     model_name="sentence-transformers/paraphrase-MiniLM-L6-v2",
     model_kwargs={"device": "cpu"},
     encode_kwargs={"normalize_embeddings": True}
 )
+
+# === Vector Store ===
 db = FAISS.from_documents(documents, embedding_model)
 retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 2})
 
-# === LLM Setup ===
+# === LLM Instance ===
 llm = ChatFireworks(
     model="accounts/fireworks/models/deepseek-v3",
     api_key=fireworks_api_key,
@@ -55,7 +53,7 @@ llm = ChatFireworks(
 
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-# === Prompts ===
+# === Prompt Templates ===
 CONDENSE_PROMPT = PromptTemplate.from_template(
     """You are a helpful AI that rephrases follow-up questions into standalone questions.
 
@@ -102,19 +100,24 @@ qa_chain = ConversationalRetrievalChain.from_llm(
 )
 
 def classify_question(inputs: dict) -> dict:
-    response = llm.invoke(CLASSIFY_PROMPT.format(**inputs))
-    print(f"[DEBUG] Raw classification response: {response}")
-    return {"text": response.content.strip().lower()}
+    try:
+        response = llm.invoke(CLASSIFY_PROMPT.format(**inputs))
+        print(f"[DEBUG] Classification Raw: {response}")
+        return {"text": response.content.strip().lower()}
+    except Exception as e:
+        print("[ERROR] Classifier failed:", e)
+        traceback.print_exc()
+        return {"text": "no"}  # Fallback classification
 
 classifier_chain = RunnableLambda(classify_question)
 
-# === Utility ===
+# === Utilities ===
 def clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", text.lower()).strip()
 
 greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afternoon", "how are you"]
 
-# === Main Response Function ===
+# === Main Logic ===
 def get_rag_response(question: str, chat_history: list) -> str:
     cleaned_q = clean_text(question)
     print(f"[DEBUG] Cleaned Question: {cleaned_q}")
@@ -122,18 +125,16 @@ def get_rag_response(question: str, chat_history: list) -> str:
     if any(cleaned_q.startswith(greet) for greet in greetings):
         return "Hey there! I'm here to help. Ask me anything about OMI Live."
 
-    # Expand vague short queries
     if len(cleaned_q.split()) <= 3 and "founder" in cleaned_q:
         question = "What have the founders said about OMI Live?"
 
     try:
         classification_result = classifier_chain.invoke({"question": question})
         classification_text = classification_result.get("text", "")
-        print(f"[DEBUG] Classification result: {classification_text}")
+        print(f"[DEBUG] Classification: {classification_text}")
     except Exception as e:
         print("[ERROR] Classification step failed:", e)
-        traceback.print_exc()
-        return "⚠️ Error during classification step."
+        return "⚠️ Error during classification."
 
     if classification_text != "yes":
         return "I'm here to help with questions about OMI Live. Try asking about our platform, brands, or features!"
@@ -143,10 +144,9 @@ def get_rag_response(question: str, chat_history: list) -> str:
             "question": question,
             "chat_history": chat_history
         })
-        print(f"[DEBUG] QA Chain result: {result}")
+        print(f"[DEBUG] QA Response: {result}")
     except Exception as e:
         print("[ERROR] QA step failed:", e)
-        traceback.print_exc()
         return "⚠️ Error retrieving an answer."
 
     answer = result.get("answer", "I don't know.")
@@ -156,14 +156,14 @@ def get_rag_response(question: str, chat_history: list) -> str:
     if any(p in low_answer for p in vague_phrases) and len(cleaned_q.split()) <= 5:
         return "Could you please clarify your question about the founders or OMI Live?"
 
-    time.sleep(1.0)  # Simulate processing delay
+    time.sleep(1.0)
     return answer
 
-# === Optional test ===
+# === Connectivity Test (Optional) ===
 if __name__ == "__main__":
     print("🔍 Testing LLM connectivity...")
     try:
         test = llm.invoke("Hello, are you online?")
-        print("[TEST] DeepSeek LLM working ✅:", test)
+        print("[TEST] DeepSeek working ✅:", test)
     except Exception as e:
-        print("[TEST] DeepSeek LLM failed ❌:", e)
+        print("[TEST] DeepSeek failed ❌:", e)

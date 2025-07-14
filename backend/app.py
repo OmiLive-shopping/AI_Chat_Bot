@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, session
-from rag_chain import get_rag_response
 from flask_cors import CORS
+from rag_chain import get_rag_response
 import traceback
 import csv
 import os
@@ -49,14 +49,12 @@ def chat():
             session["history"] = []
 
         chat_history = session["history"]
-
         answer = get_rag_response(user_input, chat_history)
 
         print(f"[DEBUG] Answer: {answer}")
 
         chat_history.append({"role": "user", "content": user_input})
         chat_history.append({"role": "assistant", "content": answer})
-
         session["history"] = chat_history
 
         return jsonify({"answer": answer})
@@ -66,6 +64,6 @@ def chat():
         return jsonify({"answer": "⚠️ Error occurred."}), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))  # 👈 This line ensures compatibility with Render
+    port = int(os.environ.get("PORT", 8000))  # For Render compatibility
     print("🚀 Starting Flask server...")
     app.run(debug=True, host="0.0.0.0", port=port)
