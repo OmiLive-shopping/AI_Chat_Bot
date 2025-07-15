@@ -9,7 +9,8 @@ html,
 body {
   height: 100%;
   font-family: Inter, Arial, sans-serif;
-  background: #f7f7f8;
+  background: transparent !important;  /* ✅ Transparent root background */
+  overflow: hidden;                    /* ✅ Prevent scrollbars inside iframe */
 }
 
 /* ---------- CHAT TOGGLE BUTTON ---------- */
@@ -19,8 +20,8 @@ body {
   right: 20px;
   width: 60px;
   height: 60px;
-  border: none;                   /* 🔥 removes white border */
-  background: #4f46e5;            /* 💬 your desired color, or transparent */
+  border: none;
+  background: #4f46e5;
   color: white;
   font-size: 28px;
   border-radius: 50%;
@@ -29,7 +30,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: none;              /* 🔥 removes any outer glow */
+  box-shadow: none;
 }
 
 /* ---------- CHAT POPUP ---------- */
@@ -328,4 +329,3 @@ textarea {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
