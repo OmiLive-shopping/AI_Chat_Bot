@@ -23,27 +23,24 @@ load_dotenv()
 fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
 print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(fireworks_api_key))
 
-# === Load Documents ===
+# === Load and Process Documents ===
 docs_faq = TextLoader("data/omi_faq.txt", encoding="utf-8").load()
 docs_kb = TextLoader("data/omilive_knowledge_base.txt", encoding="utf-8").load()
 all_docs = docs_faq + docs_kb
 
-# === Text Splitting ===
-splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=50)
 documents = splitter.split_documents(all_docs)
 
-# === Embedding Setup (CPU-only) ===
-embedding_model = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/paraphrase-MiniLM-L6-v2",
-    model_kwargs={"device": "cpu"},
-    encode_kwargs={"normalize_embeddings": True}
-)
+# === Lazy Retriever Setup ===
+def get_retriever():
+    embedding_model = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True}
+    )
+    vectorstore = FAISS.from_documents(documents, embedding_model)
+    return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 2})
 
-# === Vector Store ===
-db = FAISS.from_documents(documents, embedding_model)
-retriever = db.as_retriever(search_type="similarity", search_kwargs={"k": 2})
-
-# === LLM Instance ===
 llm = ChatFireworks(
     model="accounts/fireworks/models/deepseek-v3",
     api_key=fireworks_api_key,
@@ -53,7 +50,7 @@ llm = ChatFireworks(
 
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-# === Prompt Templates ===
+# === Prompts ===
 CONDENSE_PROMPT = PromptTemplate.from_template(
     """You are a helpful AI that rephrases follow-up questions into standalone questions.
 
@@ -90,14 +87,7 @@ Answer with only "yes" or "no"."""
 )
 
 # === Chains ===
-qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=retriever,
-    memory=memory,
-    condense_question_prompt=CONDENSE_PROMPT,
-    combine_docs_chain_kwargs={"prompt": QA_PROMPT},
-    return_source_documents=False
-)
+qa_chain = None  # Delay creation until first use
 
 def classify_question(inputs: dict) -> dict:
     try:
@@ -107,7 +97,7 @@ def classify_question(inputs: dict) -> dict:
     except Exception as e:
         print("[ERROR] Classifier failed:", e)
         traceback.print_exc()
-        return {"text": "no"}  # Fallback classification
+        return {"text": "no"}
 
 classifier_chain = RunnableLambda(classify_question)
 
@@ -119,6 +109,7 @@ greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afterno
 
 # === Main Logic ===
 def get_rag_response(question: str, chat_history: list) -> str:
+    global qa_chain
     cleaned_q = clean_text(question)
     print(f"[DEBUG] Cleaned Question: {cleaned_q}")
 
@@ -138,6 +129,21 @@ def get_rag_response(question: str, chat_history: list) -> str:
 
     if classification_text != "yes":
         return "I'm here to help with questions about OMI Live. Try asking about our platform, brands, or features!"
+
+    # Initialize QA chain only when needed
+    if qa_chain is None:
+        try:
+            qa_chain = ConversationalRetrievalChain.from_llm(
+                llm=llm,
+                retriever=get_retriever(),
+                memory=memory,
+                condense_question_prompt=CONDENSE_PROMPT,
+                combine_docs_chain_kwargs={"prompt": QA_PROMPT},
+                return_source_documents=False
+            )
+        except Exception as e:
+            print("[ERROR] QA chain initialization failed:", e)
+            return "⚠️ Internal error during response setup."
 
     try:
         result = qa_chain.invoke({
@@ -159,7 +165,7 @@ def get_rag_response(question: str, chat_history: list) -> str:
     time.sleep(1.0)
     return answer
 
-# === Connectivity Test (Optional) ===
+# === Connectivity Test ===
 if __name__ == "__main__":
     print("🔍 Testing LLM connectivity...")
     try:
