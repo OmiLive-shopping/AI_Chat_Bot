@@ -3,7 +3,7 @@ import ChatMessage from "./ChatMessage";
 
 const BASE_URL = "https://omi-chatbot.onrender.com";
 
-export default function ChatPopup({ onClose, disableToggle = false }) {
+export default function ChatPopup({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -78,20 +78,14 @@ export default function ChatPopup({ onClose, disableToggle = false }) {
     scrollToBottom();
   }, [messages]);
 
-  const popupClass = isFullscreen && !disableToggle ? "fullscreen" : "";
-
   return (
-    <div id="chat-popup" className={popupClass} style={{ height: "100%" }}>
+    <div id="chat-popup" className={isFullscreen ? "fullscreen" : ""}>
       <header className="chat-header">
         <div className="header-left">OmiBot | OMI Live</div>
         <div className="chat-header-right">
           <button className="new-chat-btn" onClick={() => window.location.reload()}>New Chat</button>
-          {!disableToggle && (
-            <>
-              <button className="fullscreen-btn" onClick={() => setIsFullscreen(!isFullscreen)}>⛶</button>
-              <button className="close-btn" onClick={onClose}>❌</button>
-            </>
-          )}
+          <button className="fullscreen-btn" onClick={() => setIsFullscreen(!isFullscreen)}>⛶</button>
+          <button className="close-btn" onClick={onClose}>❌</button>
         </div>
       </header>
 
