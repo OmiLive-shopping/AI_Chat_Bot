@@ -62,3 +62,7 @@ def chat():
         print(f"[ERROR] in /chat route: {e}")
         traceback.print_exc()
         return jsonify({"answer": "⚠️ Error occurred."}), 500
+
+# Only for local dev. Render will ignore this and use gunicorn
+if __name__ == "__main__":
+    app.run(debug=True)
