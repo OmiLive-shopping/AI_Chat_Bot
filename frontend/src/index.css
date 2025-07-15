@@ -19,16 +19,17 @@ body {
   right: 20px;
   width: 60px;
   height: 60px;
-  border-radius: 50%;
-  background: #4f46e5;
+  border: none;                   /* 🔥 removes white border */
+  background: #4f46e5;            /* 💬 your desired color, or transparent */
   color: white;
   font-size: 28px;
-  border: none;
+  border-radius: 50%;
   cursor: pointer;
   z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: none;              /* 🔥 removes any outer glow */
 }
 
 /* ---------- CHAT POPUP ---------- */
