@@ -62,8 +62,3 @@ def chat():
         print(f"[ERROR] in /chat route: {e}")
         traceback.print_exc()
         return jsonify({"answer": "⚠️ Error occurred."}), 500
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))  # For Render compatibility
-    print("🚀 Starting Flask server...")
-    app.run(debug=True, host="0.0.0.0", port=port)
