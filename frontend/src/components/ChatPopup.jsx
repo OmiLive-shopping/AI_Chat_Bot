@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import ChatMessage from "./ChatMessage";
 
+const BASE_URL = "https://omi-chatbot.onrender.com";
+
 export default function ChatPopup({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -32,7 +34,7 @@ export default function ChatPopup({ onClose }) {
     setHasAsked(true);
 
     try {
-      const res = await fetch("http://localhost:8000/chat", {
+      const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
@@ -41,7 +43,6 @@ export default function ChatPopup({ onClose }) {
       const data = await res.json();
       const finalAnswer = data.answer || "I don't know.";
 
-      // Remove placeholder and add real response
       setMessages((prev) => {
         const withoutLoading = prev.filter((msg) => !msg.loading);
         return [...withoutLoading, { type: "bot", text: finalAnswer }];
@@ -61,7 +62,7 @@ export default function ChatPopup({ onClose }) {
     if (!isValid) return alert("Please enter a valid email");
 
     try {
-      await fetch("http://localhost:8000/register-email", {
+      await fetch(`${BASE_URL}/register-email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
