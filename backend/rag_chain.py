@@ -4,10 +4,8 @@ import traceback
 import warnings
 import time
 from dotenv import load_dotenv
-from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_fireworks import ChatFireworks
 from langchain.prompts import PromptTemplate
 from langchain.chains import ConversationalRetrievalChain
@@ -23,26 +21,20 @@ load_dotenv()
 fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
 print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(fireworks_api_key))
 
-# === Embedding dummy for runtime loading ===
+# === Lazy Retriever Setup (Prebuilt FAISS Index Only) ===
 def get_retriever():
     try:
-        embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True}
-        )
-
         vectorstore = FAISS.load_local(
             "data/faiss_index",
-            embeddings=embedding_model,
-            allow_dangerous_deserialization=True
+            allow_dangerous_deserialization=True  # Required to load the .pkl file
         )
         return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 2})
     except Exception as e:
         print("[ERROR] Retriever setup failed:", e)
+        traceback.print_exc()
         raise RuntimeError("❌ FAISS retriever could not be initialized.")
 
-# === LLM ===
+# === LLM Setup ===
 llm = ChatFireworks(
     model="accounts/fireworks/models/deepseek-v3",
     api_key=fireworks_api_key,
@@ -88,9 +80,7 @@ Question: {question}
 Answer with only "yes" or "no"."""
 )
 
-qa_chain = None  # Lazy initialization
-
-# === Classifier ===
+# === Classifier Chain ===
 def classify_question(inputs: dict) -> dict:
     try:
         response = llm.invoke(CLASSIFY_PROMPT.format(**inputs))
@@ -103,13 +93,15 @@ def classify_question(inputs: dict) -> dict:
 
 classifier_chain = RunnableLambda(classify_question)
 
-# === Text Cleaning ===
+# === Utilities ===
 def clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", text.lower()).strip()
 
 greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afternoon", "how are you"]
 
-# === RAG Flow ===
+# === Main RAG Handler ===
+qa_chain = None  # Lazy init
+
 def get_rag_response(question: str, chat_history: list) -> str:
     global qa_chain
     cleaned_q = clean_text(question)
@@ -132,6 +124,7 @@ def get_rag_response(question: str, chat_history: list) -> str:
     if classification_text != "yes":
         return "I'm here to help with questions about OMI Live. Try asking about our platform, brands, or features!"
 
+    # Create the QA chain only if needed
     if qa_chain is None:
         try:
             qa_chain = ConversationalRetrievalChain.from_llm(
@@ -166,7 +159,7 @@ def get_rag_response(question: str, chat_history: list) -> str:
     time.sleep(1.0)
     return answer
 
-# === Self-test ===
+# === Connectivity Test ===
 if __name__ == "__main__":
     print("🔍 Testing LLM connectivity...")
     try:
