@@ -8,11 +8,10 @@ langchain-core==0.3.68
 langchain-huggingface==0.3.0
 langchain-fireworks==0.3.0
 
-sentence-transformers==2.5.1
+# sentence-transformers==2.5.1   # Only needed for local indexing
+# torch==2.2.2                  # Only needed for local indexing
 huggingface-hub>=0.23.0
 faiss-cpu==1.7.4
 fireworks-ai==0.18.0
 
-torch==2.2.2  # CPU-only, install with --index-url=https://download.pytorch.org/whl/cpu
-numpy<2
 gunicorn

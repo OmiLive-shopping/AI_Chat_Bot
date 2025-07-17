@@ -1,14 +1,16 @@
-# rag_chain.py
-
-import os, re, traceback, warnings, time
+import os
+import re
+import traceback
+import warnings
+import time
 from dotenv import load_dotenv
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_fireworks import ChatFireworks
 from langchain.prompts import PromptTemplate
 from langchain.chains import ConversationalRetrievalChain
 from langchain_core.runnables import RunnableLambda
 from langchain.memory import ConversationBufferMemory
+from langchain.embeddings.base import Embeddings  # <-- Import base class for dummy
 
 # === Environment Setup ===
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -18,21 +20,27 @@ load_dotenv()
 fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
 print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(fireworks_api_key))
 
-# === Retriever Setup (with fallback) ===
+
+# === Dummy Embeddings to avoid loading real model in prod ===
+class DummyEmbeddings(Embeddings):
+    def embed_documents(self, texts):
+        raise NotImplementedError("Embedding not supported at runtime")
+
+    def embed_query(self, text):
+        raise NotImplementedError("Embedding not supported at runtime")
+
+
+# === Retriever Setup (using dummy embeddings) ===
 def get_retriever():
     try:
-        # Use smaller embedding model for low memory footprint
-        embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-MiniLM-L3-v2",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True}
-        )
-        vectorstore = FAISS.load_local("data/faiss_index", embedding_model)
+        dummy_embeddings = DummyEmbeddings()
+        vectorstore = FAISS.load_local("data/faiss_index", dummy_embeddings)
         return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 2})
     except Exception as e:
         print("[ERROR] Retriever setup failed:", e)
         traceback.print_exc()
         raise RuntimeError("❌ FAISS retriever could not be initialized.")
+
 
 # === LLM and Memory Setup ===
 llm = ChatFireworks(
@@ -157,6 +165,7 @@ def get_rag_response(question: str, chat_history: list) -> str:
 
     time.sleep(1.0)
     return answer
+
 
 # === LLM Connectivity Test ===
 if __name__ == "__main__":
