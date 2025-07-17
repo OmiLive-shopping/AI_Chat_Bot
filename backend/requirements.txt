@@ -15,3 +15,4 @@ faiss-cpu==1.7.4
 fireworks-ai==0.18.0
 
 gunicorn
+numpy<2.0
