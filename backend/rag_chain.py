@@ -2,8 +2,6 @@
 
 import os, re, traceback, warnings, time
 from dotenv import load_dotenv
-from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_fireworks import ChatFireworks
@@ -12,7 +10,7 @@ from langchain.chains import ConversationalRetrievalChain
 from langchain_core.runnables import RunnableLambda
 from langchain.memory import ConversationBufferMemory
 
-# === Setup Environment ===
+# === Environment Setup ===
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 load_dotenv()
@@ -20,20 +18,21 @@ load_dotenv()
 fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
 print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(fireworks_api_key))
 
-# === Retriever Setup ===
+# === Retriever Setup (with fallback) ===
 def get_retriever():
     try:
+        # Use smaller embedding model for low memory footprint
         embedding_model = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_name="sentence-transformers/paraphrase-MiniLM-L3-v2",
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True}
         )
         vectorstore = FAISS.load_local("data/faiss_index", embedding_model)
         return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 2})
     except Exception as e:
-        print("[ERROR] Failed to load FAISS index:", e)
+        print("[ERROR] Retriever setup failed:", e)
         traceback.print_exc()
-        raise
+        raise RuntimeError("❌ FAISS retriever could not be initialized.")
 
 # === LLM and Memory Setup ===
 llm = ChatFireworks(
@@ -44,7 +43,7 @@ llm = ChatFireworks(
 )
 memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
-# === Prompt Templates ===
+# === Prompts ===
 CONDENSE_PROMPT = PromptTemplate.from_template(
     """You are a helpful AI that rephrases follow-up questions into standalone questions.
 
