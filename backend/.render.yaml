@@ -3,7 +3,7 @@ services:
     name: omi-chatbot-backend
     env: python
     buildCommand: ./build.sh
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
+    startCommand: gunicorn app:app --workers=1 --timeout=120 --bind 0.0.0.0:$PORT
     envVars:
       - key: PORT
         value: 10000
