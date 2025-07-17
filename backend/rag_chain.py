@@ -10,7 +10,7 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import ConversationalRetrievalChain
 from langchain_core.runnables import RunnableLambda
 from langchain.memory import ConversationBufferMemory
-from langchain.embeddings.base import Embeddings  # <-- Import base class for dummy
+from langchain.embeddings.base import Embeddings  # DummyEmbeddings base
 
 # === Environment Setup ===
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -34,7 +34,11 @@ class DummyEmbeddings(Embeddings):
 def get_retriever():
     try:
         dummy_embeddings = DummyEmbeddings()
-        vectorstore = FAISS.load_local("data/faiss_index", dummy_embeddings)
+        vectorstore = FAISS.load_local(
+            "data/faiss_index", 
+            dummy_embeddings,
+            allow_dangerous_deserialization=True  # <-- important flag
+        )
         return vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 2})
     except Exception as e:
         print("[ERROR] Retriever setup failed:", e)
