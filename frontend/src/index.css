@@ -5,11 +5,12 @@
   padding: 0;
 }
 
-html, body, #root {
+html,
+body {
   height: 100%;
   font-family: Inter, Arial, sans-serif;
-  background: transparent !important;
-  overflow: hidden;
+  background: transparent !important;  /* ✅ Transparent root background */
+  overflow: hidden;                    /* ✅ Prevent scrollbars inside iframe */
 }
 
 /* ---------- CHAT TOGGLE BUTTON ---------- */
@@ -35,19 +36,16 @@ html, body, #root {
 /* ---------- CHAT POPUP ---------- */
 #chat-popup {
   position: fixed;
-  bottom: 20px;
+  bottom: 100px;
   right: 20px;
   width: 100%;
   max-width: 420px;
-
-  /* 🔧 CHANGED: Use fixed height to match iframe */
-  height: 700px;
-
+  height: 600px;
   background: url("/omi_live_background.jpeg") center/cover no-repeat;
   border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   overflow: hidden;
-  z-index: 9999;
+  z-index: 999;
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(2px);
@@ -77,9 +75,6 @@ html, body, #root {
   padding: 0 20px;
   font-size: 1.1rem;
   font-weight: 500;
-  border-top-left-radius: 16px;
-  border-top-right-radius: 16px;
-  overflow: hidden;
 }
 
 .chat-header-right {
@@ -120,9 +115,7 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   padding: 20px;
-
-  /* 🔧 CHANGED: Remove calc(), let flex fill space properly */
-  height: 100%;
+  height: calc(100% - 60px);
   overflow: hidden;
 }
 
@@ -144,7 +137,7 @@ html, body, #root {
   align-items: center;
 }
 
-/* ---------- CHAT BOX ---------- */
+/* ---------- CHAT BOX (MESSAGE SCROLLER) ---------- */
 .chat-box {
   flex: 1;
   overflow-y: auto;
@@ -177,12 +170,6 @@ html, body, #root {
   background: rgba(255, 255, 255, 0.95);
   color: #111;
   border: 1px solid rgba(0, 0, 0, 0.08);
-  animation: fadeIn 0.4s ease-in;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ---------- TYPING INDICATOR ---------- */
@@ -332,4 +319,13 @@ textarea {
   textarea {
     padding: 8px 10px;
   }
+}
+
+.msg.bot {
+  animation: fadeIn 0.4s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
