@@ -40,7 +40,7 @@ body {
   right: 20px;
   width: 100%;
   max-width: 420px;
-  height: min(600px, calc(100vh - 150px)); /* Dynamic height calculation */
+  height: min(600px, calc(100vh - 150px));
   background: url("/omi_live_background.jpeg") center/cover no-repeat;
   border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
@@ -49,19 +49,6 @@ body {
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(2px);
-}
-
-/* ---------- FULLSCREEN MODE ---------- */
-#chat-popup.fullscreen {
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  width: 100%;
-  height: 100%;
-  max-width: none;
-  max-height: none;
-  border-radius: 0;
 }
 
 /* ---------- HEADER BAR ---------- */
@@ -87,7 +74,6 @@ body {
 }
 
 .new-chat-btn,
-.fullscreen-btn,
 .close-btn {
   background: white;
   color: #4f46e5;
@@ -99,16 +85,15 @@ body {
   transition: background 0.2s ease;
 }
 
-.fullscreen-btn,
+.new-chat-btn:hover {
+  background: #e0e7ff;
+}
+
 .close-btn {
   background: transparent;
   color: white;
   font-size: 1.2rem;
   padding: 0 10px;
-}
-
-.new-chat-btn:hover {
-  background: #e0e7ff;
 }
 
 /* ---------- MAIN CHAT CONTAINER ---------- */
@@ -120,15 +105,15 @@ body {
   padding: 20px;
   height: calc(100% - 60px);
   overflow: hidden;
-  position: relative; /* For absolute positioning of children */
+  position: relative;
 }
 
 /* ---------- INITIAL MESSAGE ---------- */
 .welcome {
   text-align: center;
   font-weight: 500;
-  font-size: 1.7rem; /* Reduced from 1.9rem */
-  margin: 40px 0 30px; /* Reduced top margin */
+  font-size: 1.7rem;
+  margin: 40px 0 30px;
   color: #444;
 }
 
@@ -138,10 +123,10 @@ body {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  padding-top: 20px; /* Added padding */
+  padding-top: 20px;
 }
 
-/* ---------- CHAT BOX (MESSAGE SCROLLER) ---------- */
+/* ---------- CHAT BOX ---------- */
 .chat-box {
   flex: 1;
   overflow-y: auto;
@@ -150,7 +135,7 @@ body {
   gap: 12px;
   padding: 0 6px 8px 6px;
   min-height: 0;
-  margin-top: 10px; /* Added spacing */
+  margin-top: 10px;
 }
 
 /* ---------- MESSAGE BUBBLES ---------- */
@@ -217,11 +202,6 @@ body {
   margin-top: 10px;
 }
 
-.input-bar.wide-input {
-  width: 70%;
-  margin: 20px auto; /* Increased margin */
-}
-
 textarea {
   flex: 1;
   resize: none;
@@ -262,7 +242,7 @@ textarea {
 
 /* ---------- EMAIL PROMPT ---------- */
 .email-prompt {
-  margin: 20px auto; /* Increased margin */
+  margin: 20px auto;
   text-align: center;
   width: 90%;
 }

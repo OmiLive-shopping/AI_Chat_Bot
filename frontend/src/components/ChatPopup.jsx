@@ -6,7 +6,6 @@ const BASE_URL = "https://omi-chatbot.onrender.com";
 export default function ChatPopup({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [hasAsked, setHasAsked] = useState(false);
   const [email, setEmail] = useState(localStorage.getItem("userEmail") || "");
   const [emailSubmitted, setEmailSubmitted] = useState(!!localStorage.getItem("userEmail"));
@@ -79,12 +78,11 @@ export default function ChatPopup({ onClose }) {
   }, [messages]);
 
   return (
-    <div id="chat-popup" className={isFullscreen ? "fullscreen" : ""}>
+    <div id="chat-popup">
       <header className="chat-header">
         <div className="header-left">OmiBot | OMI Live</div>
         <div className="chat-header-right">
           <button className="new-chat-btn" onClick={() => window.location.reload()}>New Chat</button>
-          <button className="fullscreen-btn" onClick={() => setIsFullscreen(!isFullscreen)}>⛶</button>
           <button className="close-btn" onClick={onClose}>❌</button>
         </div>
       </header>
@@ -105,7 +103,7 @@ export default function ChatPopup({ onClose }) {
         ) : messages.length === 0 ? (
           <div className="chat-intro">
             <h1 className="welcome">What's on your mind today?</h1>
-            <div className={`input-bar ${isFullscreen && !hasAsked ? "wide-input" : ""}`}>
+            <div className="input-bar">
               <textarea
                 ref={textareaRef}
                 rows="1"
@@ -138,7 +136,7 @@ export default function ChatPopup({ onClose }) {
                 />
               ))}
             </div>
-            <div className={`input-bar ${isFullscreen ? "wide-input" : ""}`}>
+            <div className="input-bar">
               <textarea
                 ref={textareaRef}
                 rows="1"
