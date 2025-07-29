@@ -5,12 +5,11 @@
   padding: 0;
 }
 
-html,
-body {
+html, body {
   height: 100%;
   font-family: Inter, Arial, sans-serif;
-  background: transparent !important;  /* ✅ Transparent root background */
-  overflow: hidden;                    /* ✅ Prevent scrollbars inside iframe */
+  background: transparent !important;
+  overflow: hidden;
 }
 
 /* ---------- CHAT TOGGLE BUTTON ---------- */
@@ -40,12 +39,12 @@ body {
   right: 20px;
   width: 100%;
   max-width: 420px;
-  height: 700px;                 /* ✅ Matches iframe size */
+  height: calc(100vh - 80px); /* ✅ Prevent overlap with top bar */
   background: url("/omi_live_background.jpeg") center/cover no-repeat;
-  border-radius: 16px;           /* ✅ Ensures curves on all corners */
+  border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   overflow: hidden;
-  z-index: 999;
+  z-index: 9999; /* ✅ Keep on top */
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(2px);
@@ -75,6 +74,9 @@ body {
   padding: 0 20px;
   font-size: 1.1rem;
   font-weight: 500;
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  overflow: hidden; /* ✅ Ensure curves display cleanly */
 }
 
 .chat-header-right {
@@ -137,7 +139,7 @@ body {
   align-items: center;
 }
 
-/* ---------- CHAT BOX (MESSAGE SCROLLER) ---------- */
+/* ---------- CHAT BOX ---------- */
 .chat-box {
   flex: 1;
   overflow-y: auto;
@@ -170,6 +172,12 @@ body {
   background: rgba(255, 255, 255, 0.95);
   color: #111;
   border: 1px solid rgba(0, 0, 0, 0.08);
+  animation: fadeIn 0.4s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* ---------- TYPING INDICATOR ---------- */
@@ -319,13 +327,4 @@ textarea {
   textarea {
     padding: 8px 10px;
   }
-}
-
-.msg.bot {
-  animation: fadeIn 0.4s ease-in;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
 }
