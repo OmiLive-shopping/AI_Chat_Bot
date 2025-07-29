@@ -281,13 +281,21 @@ textarea {
   border-radius: 3px;
 }
 
-/* ---------- RESPONSIVE MOBILE ---------- */
-@media (max-width: 600px) {
+/* ---------- ENHANCED MOBILE OVERRIDE ---------- */
+@media screen and (max-width: 600px) {
   #chat-popup {
-    bottom: 80px;
+    position: fixed;
+    bottom: 20px !important;
     right: 10px;
-    width: calc(100% - 20px);
-    height: min(80vh, calc(100vh - 120px));
+    left: 10px;
+    width: auto;
+    max-height: 80vh;
+    overflow: auto;
+    z-index: 9999;
+    background-color: white; /* Optional override for image-based backgrounds */
+    box-shadow: 0 0 10px rgba(0,0,0,0.3);
+    border-radius: 10px;
+    transition: all 0.3s ease-in-out;
   }
 
   .chat-shell {
@@ -316,3 +324,4 @@ textarea {
     margin: 15px auto;
   }
 }
+

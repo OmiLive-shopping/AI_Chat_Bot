@@ -77,6 +77,25 @@ export default function ChatPopup({ onClose }) {
     scrollToBottom();
   }, [messages]);
 
+  // 🌟 Mobile-Friendly Enhancement for popup sizing
+  useEffect(() => {
+    const popup = document.getElementById("chat-popup");
+    if (popup) {
+      const isMobile = window.innerWidth <= 600;
+      if (isMobile) {
+        popup.style.bottom = "20px";
+        popup.style.maxHeight = `${window.innerHeight * 0.8}px`;
+        popup.style.left = "10px";
+        popup.style.right = "10px";
+        popup.style.width = "auto";
+        popup.style.overflow = "auto";
+        popup.style.borderRadius = "10px";
+        popup.style.boxShadow = "0 0 10px rgba(0,0,0,0.3)";
+        popup.style.transition = "all 0.3s ease-in-out";
+      }
+    }
+  }, []);
+
   return (
     <div id="chat-popup">
       <header className="chat-header">
