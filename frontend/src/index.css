@@ -5,7 +5,7 @@
   padding: 0;
 }
 
-html, body {
+html, body, #root {
   height: 100%;
   font-family: Inter, Arial, sans-serif;
   background: transparent !important;
@@ -39,12 +39,15 @@ html, body {
   right: 20px;
   width: 100%;
   max-width: 420px;
-  height: calc(100vh - 80px); /* ✅ Prevent overlap with top bar */
+
+  /* 🔧 CHANGED: Use fixed height to match iframe */
+  height: 700px;
+
   background: url("/omi_live_background.jpeg") center/cover no-repeat;
   border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   overflow: hidden;
-  z-index: 9999; /* ✅ Keep on top */
+  z-index: 9999;
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(2px);
@@ -76,7 +79,7 @@ html, body {
   font-weight: 500;
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
-  overflow: hidden; /* ✅ Ensure curves display cleanly */
+  overflow: hidden;
 }
 
 .chat-header-right {
@@ -117,7 +120,9 @@ html, body {
   display: flex;
   flex-direction: column;
   padding: 20px;
-  height: calc(100% - 60px);
+
+  /* 🔧 CHANGED: Remove calc(), let flex fill space properly */
+  height: 100%;
   overflow: hidden;
 }
 
