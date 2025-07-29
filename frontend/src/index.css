@@ -36,15 +36,13 @@ body {
 /* ---------- CHAT POPUP ---------- */
 #chat-popup {
   position: fixed;
-  bottom: 0px;              /* 🟢 Keep anchored to the iframe’s bottom */
-  right: 0px;
-  top: auto;                /* 🟢 Avoid conflicting vertical push */
-  left: auto;
+  bottom: 100px;
+  right: 20px;
   width: 100%;
   max-width: 420px;
-  height: 100%;             /* 🟢 Use full height of iframe cleanly */
-  border-radius: 16px;
+  height: 600px;
   background: url("/omi_live_background.jpeg") center/cover no-repeat;
+  border-radius: 16px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   z-index: 999;
