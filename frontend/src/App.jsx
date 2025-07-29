@@ -1,9 +1,15 @@
-// src/App.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import ChatPopup from "./components/ChatPopup";
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
+
+  // Add this effect to sync with Wix
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.toggleChatExternal = setIsOpen;
+    }
+  }, []);
 
   return (
     <>
@@ -11,21 +17,29 @@ function App() {
         <button
           id="chat-toggle"
           className="chat-toggle"
-          onClick={() => setIsOpen(true)}
+          onClick={() => {
+            setIsOpen(true);
+            if (window.toggleChat) window.toggleChat(true);
+          }}
         >
           💬
         </button>
       )}
 
-      {isOpen && <ChatPopup onClose={() => setIsOpen(false)} />}
+      {isOpen && (
+        <ChatPopup 
+          onClose={() => {
+            setIsOpen(false);
+            if (window.toggleChat) window.toggleChat(false);
+          }} 
+        />
+      )}
     </>
   );
 }
 
-// Critical fix: Export BOTH normally AND to window
 export default App;
 
-// This is what makes it available to your HTML file
 if (typeof window !== 'undefined') {
-  window.ChatbotApp = App; // Changed from YourRootComponent to App
+  window.ChatbotApp = App;
 }
