@@ -98,6 +98,7 @@ def get_workbook():
 
 
 # Only for local development; Render will use gunicorn
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))  # Render injects $PORT
-    app.run(debug=True, host="0.0.0.0", port=port)
+
+#if __name__ == "__main__":
+#    port = int(os.environ.get("PORT", 8000))  # Render injects $PORT
+#    app.run(debug=True, host="0.0.0.0", port=port)
