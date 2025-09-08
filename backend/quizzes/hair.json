@@ -1,0 +1,38 @@
+{
+  "quiz_name": "Hair Type Assessment",
+  "questions": [
+    {
+      "id": 1,
+      "question": "How often does your scalp get oily?",
+      "options": [
+        {"text": "Daily or more", "type": "Oily"},
+        {"text": "Once every few days", "type": "Normal"},
+        {"text": "Rarely, scalp feels dry", "type": "Dry"},
+        {"text": "Oily at roots, dry at ends", "type": "Combination"},
+        {"text": "Itchy or sensitive scalp", "type": "Sensitive"}
+      ]
+    },
+    {
+      "id": 2,
+      "question": "How does your hair respond to sun exposure?",
+      "options": [
+        {"text": "Gets dry, brittle quickly", "type": "Dry"},
+        {"text": "Fine sun damage, but manageable", "type": "Normal"},
+        {"text": "Oily and frizzy", "type": "Oily"},
+        {"text": "Dry ends but oily roots", "type": "Combination"},
+        {"text": "Scalp irritation or redness", "type": "Sensitive"}
+      ]
+    },
+    {
+      "id": 3,
+      "question": "How would you describe hair texture?",
+      "options": [
+        {"text": "Smooth and soft", "type": "Normal"},
+        {"text": "Coarse or dry", "type": "Dry"},
+        {"text": "Greasy or limp", "type": "Oily"},
+        {"text": "Mixed textures", "type": "Combination"},
+        {"text": "Fragile, breaks easily", "type": "Sensitive"}
+      ]
+    }
+  ]
+}

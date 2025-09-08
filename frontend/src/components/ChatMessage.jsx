@@ -1,31 +1,42 @@
+// frontend/src/components/ChatMessage.jsx
 import React, { useEffect, useState } from "react";
+import "./ChatMessage.css";
 
 export default function ChatMessage({ type, text, loading }) {
-  const [displayed, setDisplayed] = useState("");
+  const [dots, setDots] = useState(".");
 
+  const isThinking = type === "bot" && (loading || text === "OmiBot is thinking...");
+
+  // Animate "..." when bot is thinking
   useEffect(() => {
-    if (loading) {
-      setDisplayed("...");
-      return;
-    }
-
-    if (type !== "bot" || typeof text !== "string") {
-      setDisplayed(text || "");
-      return;
-    }
-
-    let index = 0;
-    let buffer = ""; // collect characters safely
-
+    if (!isThinking) return;
     const interval = setInterval(() => {
-      buffer += text.charAt(index);
-      setDisplayed(buffer);
-      index++;
-      if (index >= text.length) clearInterval(interval);
-    }, 30);
-
+      setDots((prev) => (prev.length >= 3 ? "." : prev + "."));
+    }, 500);
     return () => clearInterval(interval);
-  }, [text, type, loading]);
+  }, [isThinking]);
 
-  return <div className={`msg ${type}`}>{displayed}</div>;
+  return (
+    <div className={`msg-row ${type}`}>
+      {type === "bot" && (
+        <img
+          src={isThinking ? "/omibot_thinking.jpg" : "/Omi_HeadShot.JPG"}
+          alt="OmiBot"
+          className="avatar"
+        />
+      )}
+
+      <div className={`msg ${type}`}>
+        {isThinking ? (
+          <div className="thinking-container">
+            <p className="thinking-text">
+              OmiBot is thinking{dots}
+            </p>
+          </div>
+        ) : (
+          <span>{text}</span>
+        )}
+      </div>
+    </div>
+  );
 }

@@ -1,0 +1,38 @@
+{
+  "quiz_name": "Skin Type Assessment",
+  "questions": [
+    {
+      "id": 1,
+      "question": "How does your skin usually feel a few hours after washing?",
+      "options": [
+        {"text": "Oily all over", "type": "Oily"},
+        {"text": "Tight or flaky", "type": "Dry"},
+        {"text": "Normal, balanced", "type": "Normal"},
+        {"text": "Oily in T-zone, dry elsewhere", "type": "Combination"},
+        {"text": "Red, sensitive, or irritated easily", "type": "Sensitive"}
+      ]
+    },
+    {
+      "id": 2,
+      "question": "How often do you experience breakouts?",
+      "options": [
+        {"text": "Frequently", "type": "Oily"},
+        {"text": "Rarely", "type": "Normal"},
+        {"text": "Occasionally in T-zone", "type": "Combination"},
+        {"text": "Almost never", "type": "Dry"},
+        {"text": "Breakouts with irritation", "type": "Sensitive"}
+      ]
+    },
+    {
+      "id": 3,
+      "question": "How would you describe the sensitivity of your skin?",
+      "options": [
+        {"text": "Not sensitive at all", "type": "Normal"},
+        {"text": "Sometimes itchy or red", "type": "Combination"},
+        {"text": "Easily irritated or reactive", "type": "Sensitive"},
+        {"text": "Rarely reacts", "type": "Oily"},
+        {"text": "Dry patches appear easily", "type": "Dry"}
+      ]
+    }
+  ]
+}

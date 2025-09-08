@@ -1,0 +1,151 @@
+/* Each message row */
+.msg-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin: 14px 10px;
+  width: 100%;
+}
+
+/* Bot on the left */
+.msg-row.bot {
+  justify-content: flex-start;
+  margin-left: 0;
+}
+
+/* User on the right */
+.msg-row.user {
+  justify-content: flex-end;
+  margin-right: 0;
+}
+
+/* Bot avatar */
+.avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+/* Message bubble */
+.msg {
+  padding: 10px 14px;
+  border-radius: 16px;
+  max-width: 78%;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  box-sizing: border-box;
+  word-break: break-word; /* ensures long words/URLs wrap */
+}
+
+/* Bot bubble */
+.msg.bot {
+  background-color: #f0f0f0;
+  color: #333;
+  border-top-left-radius: 6px;
+}
+
+/* User bubble */
+.msg.user {
+  background-color: #0d6efd; /* blue */
+  color: #fff;
+  border-top-right-radius: 6px;
+}
+
+/* Thinking visuals */
+.thinking-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.thinking-text {
+  font-weight: 600;
+  font-size: 1rem;
+  color: #333;
+}
+
+/* Download link styled as a button */
+.download-link {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 8px 14px;
+  background-color: #4CAF50;
+  color: white !important;
+  font-weight: 600;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: background 0.2s, transform 0.15s;
+  word-break: break-word;
+}
+
+.download-link:hover {
+  background-color: #45a049;
+  transform: scale(1.03);
+}
+
+/* ---------- Markdown Styling (for bot messages) ---------- */
+.msg.bot h1,
+.msg.bot h2,
+.msg.bot h3 {
+  margin: 8px 0 6px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.msg.bot p {
+  margin: 6px 0;
+}
+
+.msg.bot ul,
+.msg.bot ol {
+  margin: 6px 0 6px 18px;
+  padding: 0;
+}
+
+.msg.bot li {
+  margin-bottom: 4px;
+}
+
+.msg.bot code {
+  background: #e8e8e8;
+  font-family: monospace;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.msg.bot pre {
+  background: #2d2d2d;
+  color: #f8f8f2;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+
+.msg.bot a {
+  color: #0d6efd;
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.msg.bot table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.9rem;
+}
+
+.msg.bot table,
+.msg.bot th,
+.msg.bot td {
+  border: 1px solid #ccc;
+}
+
+.msg.bot th,
+.msg.bot td {
+  padding: 6px 10px;
+  text-align: left;
+}

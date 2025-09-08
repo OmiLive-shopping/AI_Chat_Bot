@@ -12,8 +12,19 @@ function App() {
           id="chat-toggle"
           className="chat-toggle"
           onClick={() => setIsOpen(true)}
+          aria-label="Open OmiBot Chat"
         >
-          💬
+          <img
+            src="/omibot_thinking.jpg"
+            alt="Open Chat"
+            style={{
+              width: "50px",
+              height: "50px",
+              borderRadius: "50%",
+              objectFit: "cover",
+              boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
+            }}
+          />
         </button>
       )}
 
@@ -22,10 +33,9 @@ function App() {
   );
 }
 
-// Critical fix: Export BOTH normally AND to window
 export default App;
 
-// This is what makes it available to your HTML file
-if (typeof window !== 'undefined') {
-  window.ChatbotApp = App; // Changed from YourRootComponent to App
+// Attach to window only if running in browser (for embedding)
+if (typeof window !== "undefined") {
+  window.ChatbotApp = App;
 }

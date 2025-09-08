@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, session, send_from_directory
 from flask_cors import CORS
 from rag_chain import get_rag_response
 import traceback
@@ -49,7 +49,16 @@ def chat():
             session["history"] = []
 
         chat_history = session["history"]
-        answer = get_rag_response(user_input, chat_history)
+
+        # =========================
+        # Special case for workbook
+        # =========================
+        if "workbook" in user_input.lower():
+            backend_url = request.host_url.rstrip("/")  # dynamic backend URL
+            answer = f'Great! 🎉 <a href="{backend_url}/get_workbook" target="_blank" download>Download Workbook</a>'
+        else:
+            # Default: use RAG
+            answer = get_rag_response(user_input, chat_history)
 
         print(f"[DEBUG] Answer: {answer}")
 
@@ -62,6 +71,31 @@ def chat():
         print(f"[ERROR] in /chat route: {e}")
         traceback.print_exc()
         return jsonify({"answer": "⚠️ Error occurred."}), 500
+
+# =========================
+# Serve Workbook Download
+# =========================
+@app.route('/get_workbook', methods=['GET'])
+def get_workbook():
+    try:
+        file_name = "Omi_Live_-_Live_Sales_Tactical_Workbook.docx"
+        file_dir = os.path.join(os.getcwd(), "data")  # absolute path to avoid mismatch
+
+        if not os.path.exists(os.path.join(file_dir, file_name)):
+            return jsonify({"error": "Workbook not found"}), 404
+
+        # send_from_directory will serve the actual file as attachment
+        return send_from_directory(
+            directory=file_dir,
+            path=file_name,
+            as_attachment=True,
+            mimetype="application/msword"
+        )
+    except Exception as e:
+        print(f"[ERROR] Sending workbook: {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Error sending workbook"}), 500
+
 
 # Only for local development; Render will use gunicorn
 if __name__ == "__main__":
