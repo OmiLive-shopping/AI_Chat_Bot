@@ -18,3 +18,7 @@ steps:
 
 images:
   - 'us-central1-docker.pkg.dev/main-entropy-467501-b6/omi-backend/backend'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
