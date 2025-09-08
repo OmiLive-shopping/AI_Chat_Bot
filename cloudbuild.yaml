@@ -1,0 +1,20 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    dir: 'backend'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/main-entropy-467501-b6/REPO_NAME/backend', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/main-entropy-467501-b6/REPO_NAME/backend']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args: [
+      'run', 'deploy', 'omi-backend',
+      '--image', 'us-central1-docker.pkg.dev/main-entropy-467501-b6/REPO_NAME/backend',
+      '--region', 'us-central1',
+      '--platform', 'managed',
+      '--allow-unauthenticated'
+    ]
+
+images:
+  - 'us-central1-docker.pkg.dev/main-entropy-467501-b6/REPO_NAME/backend'
