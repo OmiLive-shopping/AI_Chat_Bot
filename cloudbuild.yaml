@@ -15,7 +15,7 @@ steps:
       'us-central1-docker.pkg.dev/main-entropy-467501-b6/omi-backend/backend'
     ]
 
-  # Step 3: Deploy to Cloud Run with increased memory
+  # Step 3: Deploy to Cloud Run with increased memory and environment variables
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args: [
@@ -24,7 +24,9 @@ steps:
       '--region', 'us-central1',
       '--platform', 'managed',
       '--allow-unauthenticated',
-      '--memory', '1Gi'
+      '--memory', '1Gi',
+      '--set-secrets', 'FIREWORKS_API_KEY=fireworks-api-key:latest',
+      '--update-env-vars', 'DATA_DIR=/app/data,VECTORSTORE_DIR=/app/data/omi_index'
     ]
 
 images:

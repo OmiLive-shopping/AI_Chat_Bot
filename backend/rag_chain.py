@@ -1,4 +1,3 @@
-# rag_chain.py
 import os
 import re
 import difflib
@@ -33,7 +32,7 @@ load_dotenv()
 FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
 print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(FIREWORKS_API_KEY))
 
-DATA_DIR = "data"
+DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
 KB_PATH = os.path.join(DATA_DIR, "omilive_knowledge_base.txt")
 BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
@@ -41,6 +40,9 @@ WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.doc"
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
 QUIZZES_DIR = "quizzes"  # folder containing hair.json, skin.json
+
+# Where FAISS index and metadata will be saved/loaded
+VECTORSTORE_DIR = os.environ.get('VECTORSTORE_DIR', os.path.join(DATA_DIR, "omi_index"))
 
 # Persona
 SYSTEM_PERSONA = (
@@ -90,7 +92,7 @@ Answer:"""
 # User Session Management
 # =========================
 class UserSessionManager:
-    _sessions_file = "user_sessions.json"
+    _sessions_file = os.path.join(DATA_DIR, "user_sessions.json")
 
     def __init__(self):
         self.sessions = self._load_sessions()
@@ -98,7 +100,7 @@ class UserSessionManager:
     def _load_sessions(self) -> dict:
         try:
             if os.path.exists(self._sessions_file):
-                with open(self._sessions_file, 'r') as f:
+                with open(self._sessions_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
         except Exception as e:
             print(f"[ERROR] Failed to load sessions: {e}")
@@ -106,7 +108,8 @@ class UserSessionManager:
 
     def _save_sessions(self):
         try:
-            with open(self._sessions_file, 'w') as f:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(self._sessions_file, 'w', encoding='utf-8') as f:
                 json.dump(self.sessions, f, indent=2)
         except Exception as e:
             print(f"[ERROR] Failed to save sessions: {e}")
@@ -137,9 +140,9 @@ class UserSessionManager:
 # Global session manager
 _session_manager = UserSessionManager()
 
-# Helper function to get a user ID (Placeholder for CLI)
+# Helper function to get a user ID (Placeholder for CLI / web integration)
 def get_user_id():
-    # In a web app, this could be IP, cookie, or auth user id
+    # NOTE: In production, replace with real user id (cookie, auth ID, IP fallback, etc.)
     return "cli_user"
 
 # =========================
@@ -222,7 +225,11 @@ def get_llm() -> ChatFireworks:
 # =========================
 # Documents → Embeddings → Retriever
 # =========================
-def build_retriever():
+def build_retriever(save_local: bool = True):
+    """
+    Build FAISS vectorstore from source docs (FAQ + KB).
+    If save_local=True, save the vectorstore to VECTORSTORE_DIR for future loads.
+    """
     faq_text = _safe_read(FAQ_PATH)
     kb_text = _safe_read(KB_PATH)
     if not faq_text and not kb_text:
@@ -244,14 +251,61 @@ def build_retriever():
         encode_kwargs={"normalize_embeddings": True},
     )
 
+    print("[INFO] Creating FAISS index from documents (this may take a moment)...")
     vect = FAISS.from_documents(chunks, embeddings)
+
+    if save_local:
+        try:
+            os.makedirs(VECTORSTORE_DIR, exist_ok=True)
+            vect.save_local(VECTORSTORE_DIR)
+            print(f"[INFO] Saved FAISS vectorstore to: {VECTORSTORE_DIR}")
+        except Exception as e:
+            print("[WARN] Could not save FAISS vectorstore to disk:", e)
+            traceback.print_exc()
+
+    return vect.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+
+def load_retriever_from_disk():
+    """
+    Try to load the FAISS vectorstore saved in VECTORSTORE_DIR.
+    Returns a retriever or raises on failure.
+    """
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )
+    if not os.path.exists(VECTORSTORE_DIR):
+        raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
+    print(f"[INFO] Loading FAISS vectorstore from disk: {VECTORSTORE_DIR}")
+    vect = FAISS.load_local(VECTORSTORE_DIR, embeddings, allow_dangerous_deserialization=True)
     return vect.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
 def get_retriever():
+    """
+    Return the global retriever. If it's None, try to load from disk; if that fails, build it.
+    """
     global _retriever
-    if _retriever is None:
-        _retriever = build_retriever()
-    return _retriever
+    if _retriever is not None:
+        return _retriever
+
+    # Try loading persistent index first (faster)
+    try:
+        _retriever = load_retriever_from_disk()
+        print("[INFO] Retriever loaded from disk.")
+        return _retriever
+    except Exception as e:
+        print("[WARN] Could not load retriever from disk:", e)
+
+    # Fallback: build retriever from source texts and save local copy
+    try:
+        _retriever = build_retriever(save_local=True)
+        print("[INFO] Retriever built from source and saved locally.")
+        return _retriever
+    except Exception as e:
+        print("[ERROR] Failed to build retriever:", e)
+        traceback.print_exc()
+        raise
 
 def retrieve_context(query: str, k: int = 5) -> str:
     try:
@@ -262,6 +316,15 @@ def retrieve_context(query: str, k: int = 5) -> str:
         print("[ERROR] Retrieval failed:", e)
         traceback.print_exc()
         return ""
+
+# Add an explicit preload function you can call from app.py
+def preload_faiss_index():
+    """
+    Public helper: ensure the retriever is initialized (load from disk or build & save).
+    Call this at container startup so first HTTP request doesn't pay the cost.
+    """
+    print("[INFO] preload_faiss_index() called.")
+    return get_retriever()
 
 # =========================
 # Brand data & helpers
@@ -363,8 +426,17 @@ def load_quiz(file_name: str) -> dict:
     if not os.path.exists(path):
         print(f"[ERROR] Quiz file not found: {path}")
         return {}
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] Malformed quiz JSON {path}: {e}")
+        traceback.print_exc()
+        return {}
+    except Exception as e:
+        print(f"[ERROR] Could not load quiz {path}: {e}")
+        traceback.print_exc()
+        return {}
 
 # =========================
 # Quiz logic
@@ -445,7 +517,9 @@ Response:
 """
     try:
         resp = llm.invoke(prompt)
-        text = (resp.content or "I don't know.").strip()
+        # Use safe extraction
+        text = getattr(resp, "content", None) or (str(resp) if resp is not None else None) or "I don't know."
+        text = text.strip()
         # Ensure there is at least an H3 header
         if not re.search(r"^#{3}\s", text):
             text = f"### 🌿 Recommended {category.capitalize()} Routine for *{result_type}*\n\n{text}"
@@ -483,7 +557,8 @@ def answer_with_context(question: str, context: str) -> str:
     prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=question)
     try:
         resp = llm.invoke(prompt)
-        return (resp.content or "I don't know.").strip()
+        text = getattr(resp, "content", None) or (str(resp) if resp is not None else "I don't know.")
+        return text.strip()
     except Exception as e:
         print("[ERROR] LLM invocation failed:", e)
         traceback.print_exc()
@@ -523,11 +598,11 @@ def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
         session['response_count'] += 1
         _session_manager.update_session(user_id, {'response_count': session['response_count']})
         return (
-            "We’re totally vibing! 💫 **Join our newsletter?**\n"
+            "We're totally vibing! 💫 **Join our newsletter?**\n"
             "- Early access to sustainable brand deals\n"
             "- New eco finds and community tips\n"
             "- Free live shopping workbook for creators/brands\n\n"
-            "**Drop your email** and I’ll add you. 🌱"
+            "**Drop your email** and I'll add you. 🌱"
         )
 
     # ===== Quiz handling =====

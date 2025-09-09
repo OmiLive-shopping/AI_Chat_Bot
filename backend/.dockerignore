@@ -1,6 +1,11 @@
-__pycache__/
+.git
+.gitignore
+.env
 *.pyc
+__pycache__
+.DS_Store
+README.md
 *.log
-user_sessions.json
+data/*.pkl
+data/*.faiss
 data/user_emails.csv
-*.docx
