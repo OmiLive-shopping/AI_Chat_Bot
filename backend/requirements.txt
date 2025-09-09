@@ -1,18 +1,25 @@
-flask
-flask-cors
-python-dotenv
+# Core server dependencies
+flask==3.0.3
+flask-cors==4.0.0
+gunicorn==21.2.0
+python-dotenv==1.0.1
+typing-extensions==4.11.0
 
+# LangChain ecosystem
 langchain==0.3.26
-langchain-community==0.3.27
 langchain-core==0.3.68
+langchain-community==0.3.27
 langchain-huggingface==0.3.0
 langchain-fireworks==0.3.0
 
+# Embeddings and vector search
 sentence-transformers==2.5.1
-huggingface-hub>=0.23.0
 faiss-cpu==1.7.4
+huggingface-hub==0.23.1
+
+# LLM provider
 fireworks-ai==0.18.0
 
-torch==2.2.2  # CPU-only, install with --index-url=https://download.pytorch.org/whl/cpu
-numpy<2
-gunicorn
+# Torch and numerical computing
+torch==2.2.2  # Install separately in Dockerfile with CPU-only index
+numpy==1.26.4

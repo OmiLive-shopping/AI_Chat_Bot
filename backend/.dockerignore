@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.log
+user_sessions.json
+data/user_emails.csv
+*.docx
