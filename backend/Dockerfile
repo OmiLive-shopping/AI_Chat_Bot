@@ -40,8 +40,13 @@ RUN pip install --no-cache-dir \
 COPY . .
 
 # --------------------------
-# Create necessary directories
+# Security hardening
 # --------------------------
+# Create a non-root user BEFORE assigning ownership
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# --------------------------
+# Create necessary directories and assign ownership
 RUN mkdir -p data \
     && mkdir -p /home/appuser/.cache/huggingface \
     && chown -R appuser:appuser /home/appuser/.cache \
@@ -56,11 +61,6 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV FLASK_ENV=production
 ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
-
-# --------------------------
-# Security hardening
-# --------------------------
-RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 USER appuser
 
