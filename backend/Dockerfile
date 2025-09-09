@@ -5,7 +5,6 @@ WORKDIR /app
 # --------------------------
 # System dependencies
 # --------------------------
-# Install dependencies required for FAISS, sentence-transformers, etc.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -21,20 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --------------------------
 # Python dependencies
 # --------------------------
-# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install CPU-only PyTorch first with specific version compatibility
 RUN pip install --no-cache-dir \
     torch==2.2.2 \
     torchvision==0.17.2 \
     torchaudio==2.2.2 \
     --index-url https://download.pytorch.org/whl/cpu
 
-# Install other dependencies with specific versions for stability
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install additional dependencies that might be needed
 RUN pip install --no-cache-dir \
     gunicorn==21.2.0 \
     prometheus-flask-exporter==0.22.4
@@ -47,7 +42,10 @@ COPY . .
 # --------------------------
 # Create necessary directories
 # --------------------------
-RUN mkdir -p data
+RUN mkdir -p data \
+    && mkdir -p /home/appuser/.cache/huggingface \
+    && chown -R appuser:appuser /home/appuser/.cache \
+    && chown -R appuser:appuser /app
 
 # --------------------------
 # Environment variables
@@ -57,13 +55,12 @@ ENV OMP_NUM_THREADS=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV FLASK_ENV=production
+ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
 
 # --------------------------
 # Security hardening
 # --------------------------
-# Create a non-root user to run the application
-RUN groupadd -r appuser && useradd -r -g appuser appuser && \
-    chown -R appuser:appuser /app
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 USER appuser
 
