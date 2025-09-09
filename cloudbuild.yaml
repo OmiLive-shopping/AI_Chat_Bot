@@ -1,5 +1,4 @@
 steps:
-  # Step 1: Build Docker image from backend folder
   - name: 'gcr.io/cloud-builders/docker'
     dir: 'backend'
     args: [
@@ -8,14 +7,12 @@ steps:
       '.'
     ]
 
-  # Step 2: Push image to Artifact Registry
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'push',
       'us-central1-docker.pkg.dev/main-entropy-467501-b6/omi-backend/backend'
     ]
 
-  # Step 3: Deploy to Cloud Run with increased memory
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args: [
@@ -24,7 +21,9 @@ steps:
       '--region', 'us-central1',
       '--platform', 'managed',
       '--allow-unauthenticated',
-      '--memory', '1Gi'
+      '--memory', '2Gi',
+      '--cpu', '2',
+      '--timeout', '300s'
     ]
 
 images:
