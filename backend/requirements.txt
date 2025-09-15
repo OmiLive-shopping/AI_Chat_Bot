@@ -1,18 +1,36 @@
-Flask
-Flask-Cors==3.0.10
-python-dotenv
-pandas
-
-# LangChain and its Google Vertex AI integration
+# LangChain ecosystem
 langchain==0.3.26
+langchain-community==0.3.27
 langchain-core==0.3.68
+langchain-huggingface==0.3.0
 langchain-google-vertexai
 google-cloud-aiplatform
+
+# Embeddings + Retrieval
+sentence-transformers==2.5.1
+huggingface-hub>=0.23.0
 faiss-cpu==1.7.4
 
-# Core dependencies (already in your original list)
-gunicorn
+# Core dependencies
 numpy<2
+gunicorn
 
-# Utilities for file handling
+# === Added for cloud stability ===
+# Torch (CPU-only, matches your Dockerfile)
+torch==2.2.2
+
+# Required dependencies that might be missing
+transformers>=4.30.0
+accelerate>=0.20.0
+tokenizers>=0.13.0
+datasets>=2.10.0
+
+# Utilities for file handling and data processing
+pandas>=1.5.0
 requests>=2.28.0
+tqdm>=4.65.0
+packaging>=21.0
+
+# Backwards compatibility shims
+importlib-metadata>=6.0.0
+typing-extensions>=4.5.0
