@@ -7,8 +7,7 @@ WORKDIR /app
 # --------------------------
 # Install system dependencies
 # --------------------------
-# We keep build-essential and some core libs as they are often needed for some Python packages.
-# This list is more minimal but should be sufficient.
+# Install necessary system libraries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
@@ -20,26 +19,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # --------------------------
 # Copy and install Python dependencies
 # --------------------------
-# COPY requirements.txt first to leverage Docker's build cache.
+# Copy requirements.txt first to leverage Docker's build cache.
 COPY requirements.txt .
 
 # Install all Python dependencies from a single file.
-# This is a cleaner approach than installing them manually.
+# This is the most reliable way to ensure all packages are installed.
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --------------------------
 # Copy source code and data
 # --------------------------
-# Copy the entire source directory, including app.py, data/, and quizzes/.
 COPY . .
 
 # --------------------------
 # Security hardening & permissions
 # --------------------------
-# Create a non-root user for security.
 RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Create necessary directories and assign ownership
 RUN mkdir -p data quizzes \
     && chown -R appuser:appuser /app
 
@@ -64,7 +59,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # --------------------------
 # Run Gunicorn
 # --------------------------
-# The command remains the same, but the simplified setup makes it more robust.
 CMD exec gunicorn --bind 0.0.0.0:$PORT \
     --workers ${GUNICORN_WORKERS:-2} \
     --threads ${GUNICORN_THREADS:-2} \
