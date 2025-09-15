@@ -16,11 +16,10 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
-
-# Fireworks LLM
-from langchain_fireworks import ChatFireworks
 from langchain.prompts import PromptTemplate
+
+# --- Vertex AI Integrations ---
+from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
 
 # =========================
 # Setup & Globals
@@ -29,8 +28,15 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
 load_dotenv()
-FIREWORKS_API_KEY = os.getenv("FIREWORKS_API_KEY")
-print("[DEBUG] FIREWORKS_API_KEY loaded:", bool(FIREWORKS_API_KEY))
+# --- Use the Google Vertex API Key ---
+# Note: Google's best practice is to use Application Default Credentials.
+# This code assumes your API key is configured as an environment variable.
+GOOGLE_VERTEX_API_KEY = os.getenv("GOOGLE_VERTEX_API")
+print("[DEBUG] GOOGLE_VERTEX_API loaded:", bool(GOOGLE_VERTEX_API_KEY))
+# Set the environment variable for the library
+# This is an alternative to standard gcloud auth.
+if GOOGLE_VERTEX_API_KEY:
+    os.environ["GOOGLE_API_KEY"] = GOOGLE_VERTEX_API_KEY
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
@@ -168,7 +174,7 @@ def detect_routine_intent(question: str) -> Optional[str]:
         return None
 
 # Globals created once
-_llm: Optional[ChatFireworks] = None
+_llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
 
@@ -208,17 +214,17 @@ def _clean_text(text: str) -> str:
 # =========================
 # LLM
 # =========================
-def get_llm() -> ChatFireworks:
+def get_llm() -> ChatVertexAI:
     global _llm
     if _llm is not None:
         return _llm
-    if not FIREWORKS_API_KEY:
-        raise RuntimeError("FIREWORKS_API_KEY missing. Add it to your .env.")
-    _llm = ChatFireworks(
-        model="accounts/fireworks/models/deepseek-v3",
-        api_key=FIREWORKS_API_KEY,
+    if not GOOGLE_VERTEX_API_KEY:
+        raise RuntimeError("GOOGLE_VERTEX_API missing. Add it to your .env.")
+    
+    # --- Using ChatVertexAI with the Gemini Pro model ---
+    _llm = ChatVertexAI(
+        model_name="gemini-pro",
         temperature=0.4,
-        max_tokens=1024,
     )
     return _llm
 
@@ -245,11 +251,8 @@ def build_retriever(save_local: bool = True):
     chunks = splitter.split_documents(docs)
     print(f"[DEBUG] Total chunks: {len(chunks)}")
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    # --- Using VertexAIEmbeddings for embeddings ---
+    embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
 
     print("[INFO] Creating FAISS index from documents (this may take a moment)...")
     vect = FAISS.from_documents(chunks, embeddings)
@@ -270,11 +273,8 @@ def load_retriever_from_disk():
     Try to load the FAISS vectorstore saved in VECTORSTORE_DIR.
     Returns a retriever or raises on failure.
     """
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    # --- Using VertexAIEmbeddings for embeddings ---
+    embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
     if not os.path.exists(VECTORSTORE_DIR):
         raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
     print(f"[INFO] Loading FAISS vectorstore from disk: {VECTORSTORE_DIR}")
@@ -760,9 +760,9 @@ if __name__ == "__main__":
     try:
         llm = get_llm()
         ping = llm.invoke("Hello, are you online?")
-        print("[TEST] DeepSeek working ✅:", bool(getattr(ping, "content", "")))
+        print("[TEST] Gemini working ✅:", bool(getattr(ping, "content", "")))
     except Exception as e:
-        print("❌ DeepSeek failed:", e)
+        print("❌ Gemini failed:", e)
         traceback.print_exc()
         exit(1)
 
