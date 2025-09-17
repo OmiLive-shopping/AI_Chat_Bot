@@ -1,3 +1,7 @@
+flask<3
+flask-cors
+gunicorn
+
 # LangChain ecosystem
 langchain==0.3.26
 langchain-community==0.3.27
@@ -13,8 +17,6 @@ faiss-cpu==1.7.4
 
 # Core dependencies
 numpy<2
-gunicorn
-flask   # <-- Added (needed for app.py)
 
 # === Added for cloud stability ===
 # Torch (CPU-only, matches your Dockerfile)
