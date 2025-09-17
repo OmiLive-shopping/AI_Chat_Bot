@@ -8,13 +8,13 @@ from werkzeug.utils import safe_join
 
 # Import from rag_chain
 try:
-    from rag_chain import get_rag_response, preload_faiss_index, WORKBOOK_PATH
+    from rag_chain import get_rag_response, preload_faiss_index, WORKBOOK_PATH, get_user_id
 except ImportError as e:
     print(f"[WARNING] Could not import rag_chain modules: {e}")
-    # Set dummy functions to prevent crashes
     get_rag_response = lambda *args: "Chat functionality is temporarily unavailable."
     preload_faiss_index = lambda: None
     WORKBOOK_PATH = None
+    get_user_id = lambda *args: "cli_user"
 
 # =========================
 # Flask App Setup
@@ -83,7 +83,8 @@ def chat():
             return jsonify({"answer": "Empty message received"}), 400
         
         # All conversational logic is handled by get_rag_response
-        answer = get_rag_response(user_input)
+        # Pass the Flask session object to the RAG chain
+        answer = get_rag_response(user_input, session)
         
         return jsonify({"answer": answer})
     except Exception as e:

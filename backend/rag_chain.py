@@ -4,13 +4,15 @@ import difflib
 import traceback
 import warnings
 import random
-from typing import List, Optional
+from typing import List, Optional, Any
 import json
 from collections import Counter
 from datetime import datetime
 
 import pandas as pd
 from dotenv import load_dotenv
+# We remove the Flask imports here to keep the file purely for RAG logic.
+# The app.py file will handle the Flask session logic.
 
 # LangChain / embeddings / vectorstore
 from langchain_community.document_loaders import TextLoader
@@ -20,7 +22,7 @@ from langchain.prompts import PromptTemplate
 
 # --- Vertex AI Integrations ---
 from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
-from google.cloud import aiplatform
+import vertexai
 
 # =========================
 # Setup & Globals
@@ -30,12 +32,25 @@ warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub"
 
 load_dotenv()
 
-# --- Initialize Vertex AI (use ADC credentials set via gcloud) ---
-aiplatform.init(
-    project="main-entropy-467501-b6",
-    location="us-central1"  # adjust if needed
-)
-print("[INFO] Vertex AI initialized with ADC credentials")
+# --- Use the Google Vertex API Key and Project ID from .env ---
+GOOGLE_VERTEX_API_KEY = os.getenv("GOOGLE_VERTEX_API")
+GOOGLE_CLOUD_PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+
+# Set the environment variable for the library
+if GOOGLE_VERTEX_API_KEY:
+    os.environ["GOOGLE_API_KEY"] = GOOGLE_VERTEX_API_KEY
+
+if not GOOGLE_CLOUD_PROJECT_ID:
+    raise RuntimeError("GOOGLE_CLOUD_PROJECT must be set in your .env file.")
+
+# --- EXPLICITLY INITIALIZE VERTEX AI ---
+try:
+    vertexai.init(project=GOOGLE_CLOUD_PROJECT_ID, api_key=GOOGLE_VERTEX_API_KEY)
+    print(f"[INFO] Vertex AI initialized for project: {GOOGLE_CLOUD_PROJECT_ID}")
+except Exception as e:
+    print(f"[ERROR] Failed to initialize Vertex AI: {e}")
+    import sys
+    sys.exit(1)
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
@@ -44,9 +59,8 @@ BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
 WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.doc"
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
-QUIZZES_DIR = "quizzes"  # folder containing hair.json, skin.json
+QUIZZES_DIR = "quizzes"
 
-# Where FAISS index and metadata will be saved/loaded
 VECTORSTORE_DIR = os.environ.get('VECTORSTORE_DIR', os.path.join(DATA_DIR, "omi_index"))
 
 # Persona
@@ -142,29 +156,22 @@ class UserSessionManager:
             self.sessions[user_id].update(updates)
             self._save_sessions()
 
-# Global session manager
 _session_manager = UserSessionManager()
 
-# Helper function to get a user ID (Placeholder for CLI / web integration)
-def get_user_id():
-    # NOTE: In production, replace with real user id (cookie, auth ID, IP fallback, etc.)
-    return "cli_user"
+def get_user_id(session: Any) -> str:
+    if "user_id" not in session:
+        session["user_id"] = os.urandom(16).hex()
+    return session["user_id"]
 
 # =========================
 # Routine Intent Detection
 # =========================
 def detect_routine_intent(question: str) -> Optional[str]:
-    """
-    Detects if the user is asking for a hair or skin routine.
-    Returns 'hair', 'skin', or None.
-    """
     cleaned_q = _clean_text(question)
     hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
     skin_keywords = ['skin', 'face', 'acne', 'wrinkle', 'dry skin', 'oily skin', 'routine', 'regimen', 'skincare']
-
     has_hair = any(word in cleaned_q for word in hair_keywords)
     has_skin = any(word in cleaned_q for word in skin_keywords)
-
     if has_skin and not has_hair:
         return 'skin'
     elif has_hair and not has_skin:
@@ -176,13 +183,9 @@ def detect_routine_intent(question: str) -> Optional[str]:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
-
 _waiting_for_workbook_confirmation: bool = False
-
-# Quiz globals
 _current_quiz_session = None
 _quiz_answers = []
-
 GREETINGS = ("hi", "hello", "hey", "good morning", "good evening", "good afternoon")
 
 # =========================
@@ -220,7 +223,6 @@ def get_llm() -> ChatVertexAI:
     _llm = ChatVertexAI(
         model_name="gemini-pro",
         temperature=0.4,
-        # Project ID is now set globally by vertexai.init()
     )
     return _llm
 
@@ -249,7 +251,6 @@ def build_retriever(save_local: bool = True):
 
     embeddings = VertexAIEmbeddings(
         model_name="text-embedding-004",
-        # Project ID is now set globally by vertexai.init()
     )
 
     print("[INFO] Creating FAISS index from documents (this may take a moment)...")
@@ -273,7 +274,6 @@ def load_retriever_from_disk():
     """
     embeddings = VertexAIEmbeddings(
         model_name="text-embedding-004",
-        # Project ID is now set globally by vertexai.init()
     )
     if not os.path.exists(VECTORSTORE_DIR):
         raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
