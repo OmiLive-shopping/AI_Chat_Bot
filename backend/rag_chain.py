@@ -28,15 +28,20 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
 load_dotenv()
-# --- Use the Google Vertex API Key ---
-# Note: Google's best practice is to use Application Default Credentials.
-# This code assumes your API key is configured as an environment variable.
+
+# Get the Google Vertex API Key from the environment
 GOOGLE_VERTEX_API_KEY = os.getenv("GOOGLE_VERTEX_API")
 print("[DEBUG] GOOGLE_VERTEX_API loaded:", bool(GOOGLE_VERTEX_API_KEY))
+
 # Set the environment variable for the library
-# This is an alternative to standard gcloud auth.
 if GOOGLE_VERTEX_API_KEY:
     os.environ["GOOGLE_API_KEY"] = GOOGLE_VERTEX_API_KEY
+
+# --- ADD YOUR GOOGLE CLOUD PROJECT ID HERE ---
+# The logs show your project ID is 'main-entropy-467501-b6'
+GOOGLE_CLOUD_PROJECT_ID = "main-entropy-467501-b6" 
+if not GOOGLE_CLOUD_PROJECT_ID:
+    raise RuntimeError("GOOGLE_CLOUD_PROJECT_ID must be set!")
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
@@ -225,7 +230,7 @@ def get_llm() -> ChatVertexAI:
     _llm = ChatVertexAI(
         model_name="gemini-pro",
         temperature=0.4,
-        project="main-entropy-467501-b6" # 👈 Your Project ID added here
+        project=GOOGLE_CLOUD_PROJECT_ID # 👈 Use the project ID here
     )
     return _llm
 
@@ -255,7 +260,7 @@ def build_retriever(save_local: bool = True):
     # --- Using VertexAIEmbeddings for embeddings ---
     embeddings = VertexAIEmbeddings(
         model_name="text-embedding-004",
-        project="main-entropy-467501-b6" # 👈 Your Project ID added here
+        project=GOOGLE_CLOUD_PROJECT_ID # 👈 Use the project ID here
     )
 
     print("[INFO] Creating FAISS index from documents (this may take a moment)...")
@@ -280,7 +285,7 @@ def load_retriever_from_disk():
     # --- Using VertexAIEmbeddings for embeddings ---
     embeddings = VertexAIEmbeddings(
         model_name="text-embedding-004",
-        project="main-entropy-467501-b6" # 👈 Your Project ID added here
+        project=GOOGLE_CLOUD_PROJECT_ID # 👈 Use the project ID here
     )
     if not os.path.exists(VECTORSTORE_DIR):
         raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
