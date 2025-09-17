@@ -20,6 +20,7 @@ from langchain.prompts import PromptTemplate
 
 # --- Vertex AI Integrations ---
 from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
+import vertexai # 👈 New import for explicit initialization
 
 # =========================
 # Setup & Globals
@@ -29,19 +30,31 @@ warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub"
 
 load_dotenv()
 
-# Get the Google Vertex API Key from the environment
+# --- Use the Google Vertex API Key and Project ID from .env ---
+# This is the most reliable way to handle authentication.
 GOOGLE_VERTEX_API_KEY = os.getenv("GOOGLE_VERTEX_API")
-print("[DEBUG] GOOGLE_VERTEX_API loaded:", bool(GOOGLE_VERTEX_API_KEY))
+GOOGLE_CLOUD_PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+
+if not GOOGLE_VERTEX_API_KEY:
+    raise RuntimeError("GOOGLE_VERTEX_API not found. Add it to your .env.")
+if not GOOGLE_CLOUD_PROJECT_ID:
+    raise RuntimeError("GOOGLE_CLOUD_PROJECT not found. Add it to your .env.")
+
+# --- EXPLICITLY INITIALIZE VERTEX AI ---
+# This is the key fix to ensure authentication is handled correctly.
+try:
+    vertexai.init(project=GOOGLE_CLOUD_PROJECT_ID, api_key=GOOGLE_VERTEX_API_KEY)
+    print(f"[INFO] Vertex AI initialized for project: {GOOGLE_CLOUD_PROJECT_ID}")
+except Exception as e:
+    print(f"[ERROR] Failed to initialize Vertex AI: {e}")
+    # The application will likely fail to load models, so it's safer to exit.
+    import sys
+    sys.exit(1)
 
 # Set the environment variable for the library
+# This is an alternative to standard gcloud auth.
 if GOOGLE_VERTEX_API_KEY:
     os.environ["GOOGLE_API_KEY"] = GOOGLE_VERTEX_API_KEY
-
-# --- ADD YOUR GOOGLE CLOUD PROJECT ID HERE ---
-# The logs show your project ID is 'main-entropy-467501-b6'
-GOOGLE_CLOUD_PROJECT_ID = "main-entropy-467501-b6" 
-if not GOOGLE_CLOUD_PROJECT_ID:
-    raise RuntimeError("GOOGLE_CLOUD_PROJECT_ID must be set!")
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
@@ -223,14 +236,10 @@ def get_llm() -> ChatVertexAI:
     global _llm
     if _llm is not None:
         return _llm
-    if not GOOGLE_VERTEX_API_KEY:
-        raise RuntimeError("GOOGLE_VERTEX_API missing. Add it to your .env.")
-    
-    # --- Using ChatVertexAI with the Gemini Pro model ---
     _llm = ChatVertexAI(
         model_name="gemini-pro",
         temperature=0.4,
-        project=GOOGLE_CLOUD_PROJECT_ID # 👈 Use the project ID here
+        # Project ID is now set globally by vertexai.init()
     )
     return _llm
 
@@ -257,10 +266,9 @@ def build_retriever(save_local: bool = True):
     chunks = splitter.split_documents(docs)
     print(f"[DEBUG] Total chunks: {len(chunks)}")
 
-    # --- Using VertexAIEmbeddings for embeddings ---
     embeddings = VertexAIEmbeddings(
         model_name="text-embedding-004",
-        project=GOOGLE_CLOUD_PROJECT_ID # 👈 Use the project ID here
+        # Project ID is now set globally by vertexai.init()
     )
 
     print("[INFO] Creating FAISS index from documents (this may take a moment)...")
@@ -282,10 +290,9 @@ def load_retriever_from_disk():
     Try to load the FAISS vectorstore saved in VECTORSTORE_DIR.
     Returns a retriever or raises on failure.
     """
-    # --- Using VertexAIEmbeddings for embeddings ---
     embeddings = VertexAIEmbeddings(
         model_name="text-embedding-004",
-        project=GOOGLE_CLOUD_PROJECT_ID # 👈 Use the project ID here
+        # Project ID is now set globally by vertexai.init()
     )
     if not os.path.exists(VECTORSTORE_DIR):
         raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
@@ -329,7 +336,6 @@ def retrieve_context(query: str, k: int = 5) -> str:
         traceback.print_exc()
         return ""
 
-# Add an explicit preload function you can call from app.py
 def preload_faiss_index():
     """
     Public helper: ensure the retriever is initialized (load from disk or build & save).
