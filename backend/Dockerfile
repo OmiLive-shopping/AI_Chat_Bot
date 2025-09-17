@@ -7,23 +7,20 @@ WORKDIR /app
 # --------------------------
 # Install system dependencies
 # --------------------------
-# Install necessary system libraries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
     g++ \
     git \
+    curl \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # --------------------------
 # Copy and install Python dependencies
 # --------------------------
-# Copy requirements.txt first to leverage Docker's build cache.
 COPY requirements.txt .
 
-# Install all Python dependencies from a single file.
-# This is the most reliable way to ensure all packages are installed.
 RUN pip install --no-cache-dir -r requirements.txt
 
 # --------------------------
@@ -38,7 +35,6 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN mkdir -p data quizzes \
     && chown -R appuser:appuser /app
 
-# Switch to the non-root user.
 USER appuser
 
 # --------------------------

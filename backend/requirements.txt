@@ -14,6 +14,7 @@ faiss-cpu==1.7.4
 # Core dependencies
 numpy<2
 gunicorn
+flask   # <-- Added (needed for app.py)
 
 # === Added for cloud stability ===
 # Torch (CPU-only, matches your Dockerfile)
