@@ -225,6 +225,7 @@ def get_llm() -> ChatVertexAI:
     _llm = ChatVertexAI(
         model_name="gemini-pro",
         temperature=0.4,
+        project="main-entropy-467501-b6" # 👈 Your Project ID added here
     )
     return _llm
 
@@ -252,7 +253,10 @@ def build_retriever(save_local: bool = True):
     print(f"[DEBUG] Total chunks: {len(chunks)}")
 
     # --- Using VertexAIEmbeddings for embeddings ---
-    embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
+    embeddings = VertexAIEmbeddings(
+        model_name="text-embedding-004",
+        project="main-entropy-467501-b6" # 👈 Your Project ID added here
+    )
 
     print("[INFO] Creating FAISS index from documents (this may take a moment)...")
     vect = FAISS.from_documents(chunks, embeddings)
@@ -274,7 +278,10 @@ def load_retriever_from_disk():
     Returns a retriever or raises on failure.
     """
     # --- Using VertexAIEmbeddings for embeddings ---
-    embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
+    embeddings = VertexAIEmbeddings(
+        model_name="text-embedding-004",
+        project="main-entropy-467501-b6" # 👈 Your Project ID added here
+    )
     if not os.path.exists(VECTORSTORE_DIR):
         raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
     print(f"[INFO] Loading FAISS vectorstore from disk: {VECTORSTORE_DIR}")
