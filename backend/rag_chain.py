@@ -20,7 +20,7 @@ from langchain.prompts import PromptTemplate
 
 # --- Vertex AI Integrations ---
 from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
-import vertexai # 👈 New import for explicit initialization
+from google.cloud import aiplatform
 
 # =========================
 # Setup & Globals
@@ -30,31 +30,12 @@ warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub"
 
 load_dotenv()
 
-# --- Use the Google Vertex API Key and Project ID from .env ---
-# This is the most reliable way to handle authentication.
-GOOGLE_VERTEX_API_KEY = os.getenv("GOOGLE_VERTEX_API")
-GOOGLE_CLOUD_PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
-
-if not GOOGLE_VERTEX_API_KEY:
-    raise RuntimeError("GOOGLE_VERTEX_API not found. Add it to your .env.")
-if not GOOGLE_CLOUD_PROJECT_ID:
-    raise RuntimeError("GOOGLE_CLOUD_PROJECT not found. Add it to your .env.")
-
-# --- EXPLICITLY INITIALIZE VERTEX AI ---
-# This is the key fix to ensure authentication is handled correctly.
-try:
-    vertexai.init(project=GOOGLE_CLOUD_PROJECT_ID, api_key=GOOGLE_VERTEX_API_KEY)
-    print(f"[INFO] Vertex AI initialized for project: {GOOGLE_CLOUD_PROJECT_ID}")
-except Exception as e:
-    print(f"[ERROR] Failed to initialize Vertex AI: {e}")
-    # The application will likely fail to load models, so it's safer to exit.
-    import sys
-    sys.exit(1)
-
-# Set the environment variable for the library
-# This is an alternative to standard gcloud auth.
-if GOOGLE_VERTEX_API_KEY:
-    os.environ["GOOGLE_API_KEY"] = GOOGLE_VERTEX_API_KEY
+# --- Initialize Vertex AI (use ADC credentials set via gcloud) ---
+aiplatform.init(
+    project="main-entropy-467501-b6",
+    location="us-central1"  # adjust if needed
+)
+print("[INFO] Vertex AI initialized with ADC credentials")
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
