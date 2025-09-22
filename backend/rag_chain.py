@@ -34,18 +34,17 @@ warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub"
 load_dotenv()
 
 # --- GCP / Vertex config from env ---
-GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() or None
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "main-entropy-467501-b6").strip() or None
 GOOGLE_REGION = os.getenv("GOOGLE_REGION", "us-central1").strip()
 
 # Initialize Vertex AI using Application Default Credentials (ADC) / Workload Identity.
 try:
-    if GOOGLE_CLOUD_PROJECT:
+    if GOOGLE_CLOUD_PROJECT and GOOGLE_REGION:
         vertexai.init(project=GOOGLE_CLOUD_PROJECT, location=GOOGLE_REGION)
         print(f"[INFO] Vertex AI initialized for project: {GOOGLE_CLOUD_PROJECT}, region: {GOOGLE_REGION}")
     else:
-        # If no project provided, initialize with region only and rely on ADC to infer project
-        vertexai.init(location=GOOGLE_REGION)
-        print(f"[INFO] Vertex AI initialized (project inferred by ADC), region: {GOOGLE_REGION}")
+        # If no project or region is provided, initialization will fail.
+        raise ValueError("GOOGLE_CLOUD_PROJECT and GOOGLE_REGION must be set.")
 except Exception as e:
     print(f"[ERROR] Failed to initialize Vertex AI: {e}")
     traceback.print_exc()
@@ -250,7 +249,12 @@ def get_llm() -> ChatVertexAI:
 def get_embeddings() -> VertexAIEmbeddings:
     # Single place to control the embedding model name
     try:
-        return VertexAIEmbeddings(model_name="text-embedding-004")
+        # Pass the project ID and location explicitly
+        return VertexAIEmbeddings(
+            model_name="text-embedding-004",
+            project=GOOGLE_CLOUD_PROJECT,
+            location=GOOGLE_REGION
+        )
     except Exception as e:
         print(f"[ERROR] Could not initialize VertexAIEmbeddings: {e}")
         traceback.print_exc()
@@ -772,14 +776,17 @@ def get_rag_response(question: str, chat_session: Any) -> str:
 # CLI test
 # =========================
 if __name__ == "__main__":
-    print("🔧 Building retriever...")
+    # Preload the FAISS index on application startup
+    print("[INFO] Preloading FAISS index...")
     try:
-        _ = get_retriever()
-        print("✅ Retriever ready.")
+        preload_faiss_index()
+        print("[INFO] ✅ FAISS index ready.")
     except Exception as e:
-        print("❌ Retriever failed:", e)
+        print(f"[ERROR] ❌ Failed to preload FAISS index: {e}")
         traceback.print_exc()
-        exit(1)
+        # Exit with error code to prevent Gunicorn from running a broken app
+        import sys
+        sys.exit(1)
 
     print("🔍 Testing LLM connectivity...")
     try:
