@@ -1,3 +1,4 @@
+# rag_chain.py (Cloud Run / Vertex AI-ready)
 import os
 import re
 import difflib
@@ -11,8 +12,6 @@ from datetime import datetime
 
 import pandas as pd
 from dotenv import load_dotenv
-# We remove the Flask imports here to keep the file purely for RAG logic.
-# The app.py file will handle the Flask session logic.
 
 # LangChain / embeddings / vectorstore
 from langchain_community.document_loaders import TextLoader
@@ -21,6 +20,7 @@ from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 
 # --- Vertex AI Integrations ---
+# langchain-google-vertexai provides ChatVertexAI and VertexAIEmbeddings
 from langchain_google_vertexai import ChatVertexAI, VertexAIEmbeddings
 import vertexai
 
@@ -30,27 +30,26 @@ import vertexai
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
 
+# load a .env in local dev if present (no-op on Cloud Run)
 load_dotenv()
 
-# --- Use the Google Vertex API Key and Project ID from .env ---
-GOOGLE_VERTEX_API_KEY = os.getenv("GOOGLE_VERTEX_API")
-GOOGLE_CLOUD_PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT")
+# --- GCP / Vertex config from env ---
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() or None
+GOOGLE_REGION = os.getenv("GOOGLE_REGION", "us-central1").strip()
 
-# Set the environment variable for the library
-if GOOGLE_VERTEX_API_KEY:
-    os.environ["GOOGLE_API_KEY"] = GOOGLE_VERTEX_API_KEY
-
-if not GOOGLE_CLOUD_PROJECT_ID:
-    raise RuntimeError("GOOGLE_CLOUD_PROJECT must be set in your .env file.")
-
-# --- EXPLICITLY INITIALIZE VERTEX AI ---
+# Initialize Vertex AI using Application Default Credentials (ADC) / Workload Identity.
 try:
-    vertexai.init(project=GOOGLE_CLOUD_PROJECT_ID, api_key=GOOGLE_VERTEX_API_KEY)
-    print(f"[INFO] Vertex AI initialized for project: {GOOGLE_CLOUD_PROJECT_ID}")
+    if GOOGLE_CLOUD_PROJECT:
+        vertexai.init(project=GOOGLE_CLOUD_PROJECT, location=GOOGLE_REGION)
+        print(f"[INFO] Vertex AI initialized for project: {GOOGLE_CLOUD_PROJECT}, region: {GOOGLE_REGION}")
+    else:
+        # If no project provided, initialize with region only and rely on ADC to infer project
+        vertexai.init(location=GOOGLE_REGION)
+        print(f"[INFO] Vertex AI initialized (project inferred by ADC), region: {GOOGLE_REGION}")
 except Exception as e:
     print(f"[ERROR] Failed to initialize Vertex AI: {e}")
-    import sys
-    sys.exit(1)
+    traceback.print_exc()
+    # don't exit here — in many managed environments ADC will be present; keep running so higher-level code can surface errors.
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
@@ -159,9 +158,15 @@ class UserSessionManager:
 _session_manager = UserSessionManager()
 
 def get_user_id(session: Any) -> str:
-    if "user_id" not in session:
-        session["user_id"] = os.urandom(16).hex()
-    return session["user_id"]
+    if isinstance(session, dict):
+        if "user_id" not in session:
+            session["user_id"] = os.urandom(16).hex()
+        return session["user_id"]
+    # For CLI where session might be a string
+    try:
+        return str(session)
+    except Exception:
+        return os.urandom(16).hex()
 
 # =========================
 # Routine Intent Detection
@@ -214,17 +219,42 @@ def _clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", str(text).lower()).strip()
 
 # =========================
-# LLM
+# Vertex helpers: LLM + Embeddings
 # =========================
 def get_llm() -> ChatVertexAI:
+    """
+    Return a ChatVertexAI instance. Try the newer model name first
+    and fallback to a more generic alias if necessary.
+    """
     global _llm
     if _llm is not None:
         return _llm
-    _llm = ChatVertexAI(
-        model_name="gemini-pro",
-        temperature=0.4,
-    )
-    return _llm
+
+    preferred_models = ["gemini-1.5-pro", "gemini-pro", "text-bison@001"]
+    for model in preferred_models:
+        try:
+            print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
+            candidate = ChatVertexAI(model_name=model, temperature=0.4, max_output_tokens=512)
+            # Optionally test quick no-cost ping (not invoked here) — we assume init is enough
+            _llm = candidate
+            print(f"[INFO] ChatVertexAI initialized with model: {model}")
+            return _llm
+        except Exception as e:
+            print(f"[WARN] Could not initialize model {model}: {e}")
+            traceback.print_exc()
+            continue
+
+    # If none worked, raise so caller can handle it
+    raise RuntimeError("Failed to initialize any Vertex AI model. Check Vertex SDK, permissions and model availability.")
+
+def get_embeddings() -> VertexAIEmbeddings:
+    # Single place to control the embedding model name
+    try:
+        return VertexAIEmbeddings(model_name="text-embedding-004")
+    except Exception as e:
+        print(f"[ERROR] Could not initialize VertexAIEmbeddings: {e}")
+        traceback.print_exc()
+        raise
 
 # =========================
 # Documents → Embeddings → Retriever
@@ -249,9 +279,7 @@ def build_retriever(save_local: bool = True):
     chunks = splitter.split_documents(docs)
     print(f"[DEBUG] Total chunks: {len(chunks)}")
 
-    embeddings = VertexAIEmbeddings(
-        model_name="text-embedding-004",
-    )
+    embeddings = get_embeddings()
 
     print("[INFO] Creating FAISS index from documents (this may take a moment)...")
     vect = FAISS.from_documents(chunks, embeddings)
@@ -272,9 +300,7 @@ def load_retriever_from_disk():
     Try to load the FAISS vectorstore saved in VECTORSTORE_DIR.
     Returns a retriever or raises on failure.
     """
-    embeddings = VertexAIEmbeddings(
-        model_name="text-embedding-004",
-    )
+    embeddings = get_embeddings()
     if not os.path.exists(VECTORSTORE_DIR):
         raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
     print(f"[INFO] Loading FAISS vectorstore from disk: {VECTORSTORE_DIR}")
@@ -563,18 +589,18 @@ def answer_with_context(question: str, context: str) -> str:
         traceback.print_exc()
         return "⚠️ Error generating an answer."
 
-def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
+def get_rag_response(question: str, chat_session: Any) -> str:
     global _waiting_for_workbook_confirmation
 
     # --- Session Management ---
-    user_id = get_user_id()
-    session = _session_manager.get_session(user_id)
-    session['interaction_count'] += 1
+    user_id = get_user_id(chat_session)
+    session_data = _session_manager.get_session(user_id)
+    session_data['interaction_count'] += 1
 
-    if 'response_count' not in session:
-        session['response_count'] = 0
-    if 'greeting_index' not in session:
-        session['greeting_index'] = 0
+    if 'response_count' not in session_data:
+        session_data['response_count'] = 0
+    if 'greeting_index' not in session_data:
+        session_data['greeting_index'] = 0
 
     if not question or not str(question).strip():
         return "I don't know."
@@ -585,17 +611,17 @@ def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
     print(f"[DEBUG] Cleaned question: {cleaned_q}")
 
     # --- Email Submission ---
-    if re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and session.get('email') is None:
+    if re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and session_data.get('email') is None:
         _session_manager.update_session(user_id, {'email': raw_q})
         return "🎉 **Thanks for signing up!** You'll hear from us soon. How can I help you next?"
 
     # --- Newsletter Prompt after 4 bot responses (inc. greeting) ---
-    if (session.get('response_count', 0) >= 3 and session.get('email') is None and
+    if (session_data.get('response_count', 0) >= 3 and session_data.get('email') is None and
             not _waiting_for_workbook_confirmation and not _current_quiz_session and
             not any(cleaned_q.startswith(g) for g in GREETINGS)):
         _session_manager.update_session(user_id, {'last_prompted_at': datetime.now().isoformat()})
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return (
             "We're totally vibing! 💫 **Join our newsletter?**\n"
             "- Early access to sustainable brand deals\n"
@@ -608,50 +634,50 @@ def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
     if _current_quiz_session:
         if cleaned_q.isdigit():
             response = answer_quiz_option(int(cleaned_q))
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return response
         elif cleaned_q in ["start", "yes", "begin"]:
             response = get_next_quiz_question()
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return response
         else:
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return "Please enter the number of your choice for the quiz or type **'start'** to begin."
 
     # ===== Routine Intent Detection & Quiz Trigger =====
-    if not _current_quiz_session and session.get('email') is not None:
+    if not _current_quiz_session and session_data.get('email') is not None:
         routine_type = detect_routine_intent(raw_q)
         if routine_type:
             response = start_quiz(routine_type)
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return response
 
     # ===== Quiz commands =====
     if cleaned_q in {"start hair quiz", "hair quiz"}:
         response = start_quiz("hair")
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
     if cleaned_q in {"start skin quiz", "skin quiz"}:
         response = start_quiz("skin")
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
 
     # ===== Greetings =====
     if any(cleaned_q.startswith(g) for g in GREETINGS):
-        greeting_index = session.get('greeting_index', 0)
+        greeting_index = session_data.get('greeting_index', 0)
         greeting = VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]
         response = f"{greeting} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
-        session['response_count'] += 1
-        session['greeting_index'] = (greeting_index + 1) % len(VARIED_GREETINGS)
+        session_data['response_count'] += 1
+        session_data['greeting_index'] = (greeting_index + 1) % len(VARIED_GREETINGS)
         _session_manager.update_session(user_id, {
-            'response_count': session['response_count'],
-            'greeting_index': session['greeting_index']
+            'response_count': session_data['response_count'],
+            'greeting_index': session_data['greeting_index']
         })
         return response
 
@@ -659,22 +685,22 @@ def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
     if "workbook" in cleaned_q:
         _waiting_for_workbook_confirmation = True
         response = "I have the *Omi Live Tactical Workbook* 📘 — do you want it in **.doc** format where you can download?"
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
 
     if _waiting_for_workbook_confirmation and cleaned_q in {"yes", "sure", "okay", "ok", "yep", "yeah"}:
         _waiting_for_workbook_confirmation = False
         response = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
 
     # ===== Brand rankings =====
     if re.search(r"\b(rank(ing)?\s*brands?|brand\s*ranking|do\s+you\s+rank)\b", cleaned_q):
         response = respond_list_all_brands()
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
 
     m = re.match(r"^\s*(rank|ranking)\s+(.*)$", raw_q, flags=re.IGNORECASE)
@@ -682,24 +708,24 @@ def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
         brand_candidate = m.group(2).strip()
         if not brand_candidate:
             response = respond_list_all_brands()
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return response
         candidates = fuzzy_lookup_brand_candidates(brand_candidate, top_n=5, strict=False)
         if not candidates:
             response = "I couldn't find that brand. Try one from my list: " + list_all_brands_str()
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return response
         if len(candidates) == 1:
             ans = get_brand_ranking_single(candidates[0])
             response = ans or "I don't know."
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return response
         response = "Did you mean one of these?\n- " + "\n- ".join(candidates)
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
 
     brand_candidates = fuzzy_lookup_brand_candidates(raw_q, top_n=3, strict=False)
@@ -709,21 +735,21 @@ def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
         if target:
             ans = get_brand_ranking_single(target)
             if ans:
-                session['response_count'] += 1
-                _session_manager.update_session(user_id, {'response_count': session['response_count']})
+                session_data['response_count'] += 1
+                _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
                 return ans
         if len(brand_candidates) > 1:
             response = "Did you mean one of these?\n- " + "\n- ".join(brand_candidates)
-            session['response_count'] += 1
-            _session_manager.update_session(user_id, {'response_count': session['response_count']})
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
             return response
 
     # ===== General RAG =====
     context = retrieve_context(raw_q, k=5)
     if not context.strip():
         response = "I don't know."
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
 
     answer = answer_with_context(raw_q, context)
@@ -734,12 +760,12 @@ def get_rag_response(question: str, chat_history: Optional[list] = None) -> str:
 
     if "i don't know" in answer.lower() and len(cleaned_q.split()) <= 5:
         response = "Could you clarify your question a bit?"
-        session['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session['response_count']})
+        session_data['response_count'] += 1
+        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
         return response
 
-    session['response_count'] += 1
-    _session_manager.update_session(user_id, {'response_count': session['response_count']})
+    session_data['response_count'] += 1
+    _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
     return answer
 
 # =========================
@@ -771,5 +797,5 @@ if __name__ == "__main__":
         user_input = input("\nYou: ").strip()
         if user_input.lower() in ['quit', 'exit', 'bye']:
             break
-        response = get_rag_response(user_input)
+        response = get_rag_response(user_input, "cli_user") # Pass a dummy session for CLI
         print(f"OMI: {response}")

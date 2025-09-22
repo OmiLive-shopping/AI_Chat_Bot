@@ -1,5 +1,6 @@
-# Use a Python 3.10 slim base image for a smaller footprint.
-FROM python:3.10-slim
+# Use a Python 3.10 slim base image for a smaller footprint
+# Explicitly use the linux/amd64 platform to ensure compatibility with Cloud Run
+FROM --platform=linux/amd64 python:3.10-slim-bullseye
 
 # Set working directory in the container
 WORKDIR /app
@@ -31,8 +32,8 @@ COPY . .
 # --------------------------
 # Security hardening & permissions
 # --------------------------
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-RUN mkdir -p data quizzes \
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && mkdir -p data quizzes \
     && chown -R appuser:appuser /app
 
 USER appuser
@@ -40,11 +41,13 @@ USER appuser
 # --------------------------
 # Environment variables
 # --------------------------
+# Google Cloud Run will inject credentials automatically
 ENV PORT=8080
 ENV OMP_NUM_THREADS=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV FLASK_ENV=production
+ENV GOOGLE_APPLICATION_CREDENTIALS=""
 
 # --------------------------
 # Health check
