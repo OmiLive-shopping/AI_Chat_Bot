@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub"
 load_dotenv()
 
 # --- GCP / Vertex config from env ---
-GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "main-entropy-467501-b6").strip() or None
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() or "main-entropy-467501-b6"
 GOOGLE_REGION = os.getenv("GOOGLE_REGION", "us-central1").strip()
 
 # Initialize Vertex AI using Application Default Credentials (ADC) / Workload Identity.
@@ -233,7 +233,14 @@ def get_llm() -> ChatVertexAI:
     for model in preferred_models:
         try:
             print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
-            candidate = ChatVertexAI(model_name=model, temperature=0.4, max_output_tokens=512)
+            # Pass the project and location to ChatVertexAI explicitly
+            candidate = ChatVertexAI(
+                model_name=model,
+                temperature=0.4,
+                max_output_tokens=512,
+                project=GOOGLE_CLOUD_PROJECT,
+                location=GOOGLE_REGION
+            )
             # Optionally test quick no-cost ping (not invoked here) — we assume init is enough
             _llm = candidate
             print(f"[INFO] ChatVertexAI initialized with model: {model}")
