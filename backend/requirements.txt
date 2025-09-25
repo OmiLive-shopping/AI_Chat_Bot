@@ -10,8 +10,9 @@ langchain-core==0.3.68
 langchain-google-vertexai>=2.0.0
 langchain-community>=0.0.38
 
-# Google SDK for Vertex AI
+# Google SDKs
 google-cloud-aiplatform>=1.26.0
+google-cloud-firestore  # <-- ADD THIS LINE
 
 # Embeddings + vector DB
 faiss-cpu==1.7.4
