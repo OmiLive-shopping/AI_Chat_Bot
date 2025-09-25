@@ -1,0 +1,23 @@
+{
+  "7896da584fcae5ac788f8f3d3760e25f": {
+    "interaction_count": 1,
+    "email": null,
+    "last_prompted_at": null,
+    "response_count": 1,
+    "greeting_index": 0
+  },
+  "3939d3e519cdb9afac58acd6f7ff7a29": {
+    "interaction_count": 1,
+    "email": null,
+    "last_prompted_at": null,
+    "response_count": 1,
+    "greeting_index": 1
+  },
+  "c86f1e49426c8887e061c72c6b97321c": {
+    "interaction_count": 1,
+    "email": null,
+    "last_prompted_at": null,
+    "response_count": 1,
+    "greeting_index": 0
+  }
+}

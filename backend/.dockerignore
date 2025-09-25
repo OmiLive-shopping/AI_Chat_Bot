@@ -1,3 +1,4 @@
+# Keep these lines
 .git
 .gitignore
 *.pyc
@@ -5,6 +6,13 @@ __pycache__
 .DS_Store
 README.md
 *.log
-data/*.pkl
-data/*.faiss
-data/user_emails.csv
+
+# Remove or comment out these if needed:
+# data/*.pkl
+# data/*.faiss
+# data/user_emails.csv
+
+# ✅ Do NOT exclude these:
+# data/omi_faq.txt
+# data/omilive_knowledge_base.txt
+# quizzes/*.json

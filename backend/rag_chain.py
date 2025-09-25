@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub"
 load_dotenv()
 
 # --- GCP / Vertex config from env ---
-GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() or "main-entropy-467501-b6"
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip() or "omi-live-backend"
 GOOGLE_REGION = os.getenv("GOOGLE_REGION", "us-central1").strip()
 
 # Initialize Vertex AI using Application Default Credentials (ADC) / Workload Identity.
@@ -226,14 +226,16 @@ def get_llm() -> ChatVertexAI:
     and fallback to a more generic alias if necessary.
     """
     global _llm
+    print("[DEBUG] get_llm() called")
+
     if _llm is not None:
+        print("[DEBUG] Returning cached LLM instance")
         return _llm
 
     preferred_models = ["gemini-1.5-pro", "gemini-pro", "text-bison@001"]
     for model in preferred_models:
         try:
             print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
-            # Pass the project and location to ChatVertexAI explicitly
             candidate = ChatVertexAI(
                 model_name=model,
                 temperature=0.4,
@@ -241,17 +243,23 @@ def get_llm() -> ChatVertexAI:
                 project=GOOGLE_CLOUD_PROJECT,
                 location=GOOGLE_REGION
             )
-            # Optionally test quick no-cost ping (not invoked here) — we assume init is enough
+            # Optional: test invocation to confirm model is responsive
+            test_resp = candidate.invoke("Hello, are you online?")
+            test_content = getattr(test_resp, "content", None)
+            if not test_content:
+                print(f"[WARN] Model {model} responded with empty content. Trying next.")
+                continue
+
             _llm = candidate
-            print(f"[INFO] ChatVertexAI initialized with model: {model}")
+            print(f"[INFO] ChatVertexAI initialized and verified with model: {model}")
             return _llm
         except Exception as e:
             print(f"[WARN] Could not initialize model {model}: {e}")
             traceback.print_exc()
             continue
 
-    # If none worked, raise so caller can handle it
     raise RuntimeError("Failed to initialize any Vertex AI model. Check Vertex SDK, permissions and model availability.")
+
 
 def get_embeddings() -> VertexAIEmbeddings:
     # Single place to control the embedding model name
@@ -758,10 +766,27 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     # ===== General RAG =====
     context = retrieve_context(raw_q, k=5)
     if not context.strip():
-        response = "I don't know."
-        session_data['response_count'] += 1
-        _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
-        return response
+        print("[INFO] No context found in FAISS. Falling back to Vertex AI.")
+        llm = get_llm()
+        try:
+            resp = llm.invoke(raw_q)
+            answer = getattr(resp, "content", None) or str(resp) or "I don't know."
+            answer = answer.strip()
+
+            # Add a markdown header if none exists
+            if not re.search(r"^#{1,3}\s", answer):
+                answer = f"### ✨ Here's what I found\n\n{answer}"
+
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
+            return answer
+        except Exception as e:
+            print("[ERROR] Vertex fallback failed:", e)
+            traceback.print_exc()
+            session_data['response_count'] += 1
+            _session_manager.update_session(user_id, {'response_count': session_data['response_count']})
+            return "⚠️ Error occurred. Please try again."
+
 
     answer = answer_with_context(raw_q, context)
 

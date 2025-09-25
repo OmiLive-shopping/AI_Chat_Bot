@@ -3,21 +3,21 @@ steps:
     dir: 'backend'
     args: [
       'build',
-      '-t', 'us-central1-docker.pkg.dev/main-entropy-467501-b6/omi-backend/backend',
+      '-t', 'us-central1-docker.pkg.dev/omi-live-backend/omi-backend/backend',
       '.'
     ]
 
   - name: 'gcr.io/cloud-builders/docker'
     args: [
       'push',
-      'us-central1-docker.pkg.dev/main-entropy-467501-b6/omi-backend/backend'
+      'us-central1-docker.pkg.dev/omi-live-backend/omi-backend/backend'
     ]
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args: [
       'run', 'deploy', 'omi-backend',
-      '--image', 'us-central1-docker.pkg.dev/main-entropy-467501-b6/omi-backend/backend',
+      '--image', 'us-central1-docker.pkg.dev/omi-live-backend/omi-backend/backend',
       '--region', 'us-central1',
       '--platform', 'managed',
       '--allow-unauthenticated',
@@ -27,7 +27,7 @@ steps:
     ]
 
 images:
-  - 'us-central1-docker.pkg.dev/main-entropy-467501-b6/omi-backend/backend'
+  - 'us-central1-docker.pkg.dev/omi-live-backend/omi-backend/backend'
 
 options:
   logging: CLOUD_LOGGING_ONLY
