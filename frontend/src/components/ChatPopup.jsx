@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import ChatMessage from "./ChatMessage";
 
-const BASE_URL = "https://omi-backend-355024965259.us-central1.run.app";
+const BASE_URL = "http://127.0.0.1:8080";
 
 export default function ChatPopup({ onClose }) {
   const [messages, setMessages] = useState([]);
