@@ -177,7 +177,7 @@ _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
 GREETINGS = ("hi", "hello", "hey")
 SMALL_TALK = ("how are you", "how are you doing")
-AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please"}
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz"}
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -266,7 +266,7 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     if df.empty: return []
     key = _make_key(user_text)
     keys = df["brand_key"].tolist()
-    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.7) # Slightly higher cutoff
+    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.7)
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
@@ -281,7 +281,7 @@ def offer_quiz(session_data: dict, quiz_type: str) -> str:
 def start_quiz(session_data: dict) -> str:
     quiz_type = session_data.get("quiz_type_pending")
     if not quiz_type: return "I'm not sure which quiz you wanted to start."
-    session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_quiz_start": False})
+    session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_quiz_start": False, "quiz_type_pending": None})
     try:
         with open(os.path.join(QUIZZES_DIR, f"{quiz_type}.json"), 'r') as f:
             quiz_data = json.load(f)
@@ -318,7 +318,7 @@ def finish_quiz(session_data: dict) -> str:
     return f"**Your {quiz_type} type:** *{result_type}*\n\n{recommendation}\n\n📘 Want me to send the *Omi Live Tactical Workbook*?"
 
 # =========================
-# Main Response Generator
+# Main Response Generator (Rewritten Logic)
 # =========================
 def get_rag_response(question: str, chat_session: Any) -> str:
     user_id = get_user_id(chat_session)
@@ -334,9 +334,9 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     if session_data.get("current_quiz_session"):
         if cleaned_q.isdigit(): answer = answer_quiz_option(session_data, int(cleaned_q))
         else:
-            session_data["current_quiz_session"] = None
-            answer = "Quiz cancelled. How can I help with something else?"
-    elif session_data.get("waiting_for_quiz_start") and cleaned_q in (AFFIRMATIONS | {"start", "start quiz"}):
+            session_data["current_quiz_session"] = None # Cancel quiz if user asks something else
+            # We don't set an answer yet, so the new question can be processed below
+    elif session_data.get("waiting_for_quiz_start") and cleaned_q in AFFIRMATIONS:
         answer = start_quiz(session_data)
     elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in AFFIRMATIONS:
         session_data['waiting_for_workbook_confirmation'] = False
@@ -369,14 +369,14 @@ def get_rag_response(question: str, chat_session: Any) -> str:
 
     # --- Fallback: General RAG for everything else ---
     if not answer:
-        # Reset state flags if user changes the topic
+        # Reset any pending offers if user changes topic
         session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False, 'waiting_for_brand_list': False})
         
         # Handle single-word brand queries better
         if len(cleaned_q.split()) <= 3:
             candidates = fuzzy_lookup_brand_candidates(raw_q)
             if len(candidates) == 1:
-                answer = get_brand_ranking_single(candidates[0]) # Directly give the ranking
+                answer = get_brand_ranking_single(candidates[0])
             elif len(candidates) > 1:
                  answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
@@ -389,8 +389,8 @@ def get_rag_response(question: str, chat_session: Any) -> str:
                 answer = get_llm().invoke(prompt).content
             
             # Add a proactive suggestion ONLY after a general RAG answer
-            if session_data.get('response_count', 0) % 4 == 0: # Suggest every 4 messages
-                proactive_suggestion = "\n\nBy the way, I can also create a personalized hair or skin care routine for you. Just ask!"
+            if 'founder' in cleaned_q or 'omi live' in cleaned_q:
+                proactive_suggestion = "\n\nI can also rank brands on their sustainability scores or help you with a personalized skin care quiz. What are you curious about?"
 
     # --- Final Step: Append Newsletter Prompt ---
     if session_data.get('response_count', 0) == 2 and not session_data.get('email'):
