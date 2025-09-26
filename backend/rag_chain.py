@@ -205,24 +205,35 @@ def preload_faiss_index():
     print("[INFO] FAISS index and brand data are ready.")
 
 # =========================
-# Brand Logic
+# Brand Logic (Restored from previous version)
 # =========================
-def get_brand_df() -> pd.DataFrame:
-    global _brand_df
-    if not _brand_df.empty: return _brand_df
-    if not os.path.exists(BRAND_CSV): return pd.DataFrame()
+def load_brand_df() -> pd.DataFrame:
+    if not os.path.exists(BRAND_CSV):
+        print(f"[WARN] Brand CSV not found at {BRAND_CSV}. Brand features will be disabled.")
+        return pd.DataFrame()
     try:
         df = pd.read_csv(BRAND_CSV)
-        original_brand_col = next((col for col in df.columns if 'brand' in col.lower() and 'name' in col.lower()), None)
-        if not original_brand_col: return pd.DataFrame()
-        df = df.rename(columns={original_brand_col: "brand_name"})
-        df.columns = [_make_key(c) for c in df.columns]
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+        possible_score_cols = [c for c in df.columns if "final" in c and "score" in c]
+        if possible_score_cols:
+            df = df.rename(columns={possible_score_cols[0]: "final_score"})
+        if "brand_name" not in df.columns:
+            for c in df.columns:
+                if "brand" in c and "name" in c:
+                    df = df.rename(columns={c: "brand_name"})
+                    break
+        df = df[df["brand_name"].astype(str).str.strip().ne("")]
         df["brand_key"] = df["brand_name"].apply(_make_key)
-        _brand_df = df.dropna(subset=['brand_name'])
-        return _brand_df
+        return df
     except Exception as e:
-        print(f"[ERROR] Failed to load or process brand CSV: {e}")
+        print(f"[ERROR] Failed to load brand metrics: {e}")
         return pd.DataFrame()
+
+def get_brand_df() -> pd.DataFrame:
+    global _brand_df
+    if _brand_df.empty:
+        _brand_df = load_brand_df()
+    return _brand_df
 
 def get_brand_ranking_single(brand_name: str) -> str:
     df = get_brand_df()
@@ -230,15 +241,19 @@ def get_brand_ranking_single(brand_name: str) -> str:
     key = _make_key(brand_name)
     row = df[df["brand_key"] == key]
     if row.empty: return f"I couldn't find a ranking for '{brand_name}'. Try asking me to 'list brands' to see who I track!"
+    
     row = row.iloc[0]
-    score = row.get('finalscore', 'N/A')
-    try:
-        start_index = df.columns.get_loc('brandname') + 1
-        end_index = df.columns.get_loc('finalscore')
-        breakdown_cols = df.columns[start_index:end_index]
-        breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if pd.notna(row[col])]
-    except KeyError:
-        breakdown = []
+    score = row.get('final_score', 'N/A')
+    
+    breakdown_cols = [
+        "recycled/upcycled_materials",
+        "end_of_life_solutions_(compostable_packaging/zero_waste)",
+        "worker_welfare/living_wage", "local_sourcing",
+        "sustainability_data_accessibility",
+        "marketing_honesty/_certifications",
+    ]
+    breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
+
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
     if breakdown:
         response += "\n\n" + "\n".join(breakdown)
@@ -250,12 +265,13 @@ def respond_list_all_brands() -> str:
     brands = sorted(df["brand_name"].dropna().unique())
     return "📊 **Yes! I track these brands:**\n" + ", ".join(brands)
 
-def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
+def fuzzy_lookup_brand_candidates(user_text: str, strict: bool = False) -> List[str]:
     df = get_brand_df()
-    if df.empty: return []
+    if df.empty or "brand_key" not in df.columns: return []
     key = _make_key(user_text)
     keys = df["brand_key"].tolist()
-    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.6)
+    cutoff = 0.85 if strict else 0.6
+    matches = difflib.get_close_matches(key, keys, n=5, cutoff=cutoff)
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
@@ -280,7 +296,6 @@ def start_quiz(session_data: dict) -> str:
     return get_next_quiz_question(session_data)
 
 def get_next_quiz_question(session_data: dict) -> str:
-    # ... (No changes needed here)
     quiz_session = session_data["current_quiz_session"]
     idx = quiz_session["question_idx"]
     questions = quiz_session["quiz_data"]["questions"]
@@ -291,7 +306,6 @@ def get_next_quiz_question(session_data: dict) -> str:
 
 
 def answer_quiz_option(session_data: dict, option_num: int) -> str:
-    # ... (No changes needed here)
     quiz_session = session_data["current_quiz_session"]
     q = quiz_session["quiz_data"]["questions"][quiz_session["question_idx"]]
     if 1 <= option_num <= len(q["options"]):
@@ -301,7 +315,6 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
 def finish_quiz(session_data: dict) -> str:
-    # ... (No changes needed here)
     result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
     quiz_type = session_data["current_quiz_session"]["quiz_type"]
     context = get_retriever().invoke(f"{result_type} {quiz_type} routine recommendation")
@@ -319,7 +332,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
     cleaned_q = _clean_text(raw_q)
-    print(f"[DEBUG] User '{user_id}' asked: '{raw_q}' | Session state: {session_data.get('current_quiz_session')}, {session_data.get('waiting_for_workbook_confirmation')}, {session_data.get('waiting_for_quiz_start')}")
+    print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
     answer = ""
     # --- Highest Priority: Handle ongoing stateful conversations ---
     if session_data.get("current_quiz_session"):
