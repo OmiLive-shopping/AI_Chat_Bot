@@ -250,7 +250,7 @@ def get_llm() -> ChatVertexAI:
     if _llm is not None:
         return _llm
 
-    preferred_models = ["gemini-1.5-flash-001", "gemini-1.0-pro-002"]
+    preferred_models = ["gemini-1.5-flash-002", "gemini-1.0-pro-002"]
     for model in preferred_models:
         try:
             print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
