@@ -64,7 +64,8 @@ BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
 WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.doc"
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
-QUIZZES_DIR = "quizzes"
+# UPDATED: Correctly path the quizzes directory to prevent file not found errors.
+QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
 VECTORSTORE_DIR = os.environ.get('VECTORSTORE_DIR', os.path.join(DATA_DIR, "omi_index"))
 
 # Persona
@@ -248,10 +249,8 @@ def get_llm() -> ChatVertexAI:
     global _llm
     if _llm is not None:
         return _llm
-
-    # UPDATED: Prioritize gemini-1.5-flash for speed and cost-effectiveness in a chat app,
-    # with the more powerful gemini-1.5-pro as a fallback.
-    preferred_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    
+    preferred_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"] 
     for model in preferred_models:
         try:
             print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
@@ -262,7 +261,6 @@ def get_llm() -> ChatVertexAI:
                 project=GOOGLE_CLOUD_PROJECT,
                 location=GOOGLE_REGION
             )
-            # A simple invoke test to ensure the model is responsive.
             test_resp = candidate.invoke("Hello, are you online?")
             if not getattr(test_resp, "content", None):
                 print(f"[WARN] Model {model} responded with empty content. Trying next.")
@@ -280,7 +278,6 @@ def get_llm() -> ChatVertexAI:
 def get_embeddings() -> VertexAIEmbeddings:
     """Returns a consistent VertexAIEmbeddings instance."""
     try:
-        # Using a specific, high-performance model for embeddings.
         return VertexAIEmbeddings(
             model_name="text-embedding-004",
             project=GOOGLE_CLOUD_PROJECT,
@@ -297,7 +294,6 @@ def get_embeddings() -> VertexAIEmbeddings:
 def build_retriever(save_local: bool = True):
     """
     Build FAISS vectorstore from source docs.
-    If save_local=True, save the vectorstore to VECTORSTORE_DIR for future loads.
     """
     faq_text = _safe_read(FAQ_PATH)
     kb_text = _safe_read(KB_PATH)
@@ -357,8 +353,6 @@ def retrieve_context(query: str) -> str:
     """
     try:
         retriever = get_retriever()
-        # UPDATED: Use .invoke() instead of the deprecated .get_relevant_documents()
-        # This resolves the warning from your logs and aligns with modern LangChain standards.
         docs = retriever.invoke(query)
         return "\n\n".join(d.page_content for d in docs if d and d.page_content)
     except Exception as e:
@@ -455,13 +449,16 @@ def get_brand_ranking_single(best_name: str) -> str:
     breakdown = "\n".join(breakdown_text)
     if breakdown:
         breakdown = f"\n\n**Breakdown:**\n{breakdown}"
-    return f"🌍 *{row['brand_name']}* — Sustainability score **{score} / 30**.{breakdown}"
+    
+    response = f"🌍 *{row['brand_name']}* — Sustainability score **{score} / 30**.{breakdown}"
+    response += "\n\nWould you like me to rank another brand?" # More interactive
+    return response
 
 def respond_list_all_brands() -> str:
     brands_str = list_all_brands_str()
     if not brands_str:
         return "I don't currently have brand rankings in my dataset."
-    return "📊 **Yes! I track these brands:**\n" + brands_str
+    return "📊 **Yes! I track these brands:**\n" + brands_str + "\n\nJust ask me to 'rank [brand name]'."
 
 # =========================
 # Quiz JSON loader
@@ -489,7 +486,8 @@ def start_quiz(quiz_type: str) -> str:
     quiz_file = "hair.json" if quiz_type == "hair" else "skin.json"
     quiz_data = load_quiz(quiz_file)
     if not quiz_data:
-        return "Sorry, I couldn't load the quiz."
+        # Give a more helpful error message to the user
+        return "I'm sorry, my quiz materials seem to be missing at the moment. I can still answer other questions about sustainable living!"
     _current_quiz_session = {
         "quiz_data": quiz_data,
         "question_idx": 0,
@@ -607,7 +605,6 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     user_id = get_user_id(chat_session)
     session_data = _session_manager.get_session(user_id)
     
-    # Use a dictionary for session updates to minimize DB writes
     session_updates = {}
 
     if not question or not str(question).strip():
@@ -617,120 +614,103 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     cleaned_q = _clean_text(raw_q)
     print(f"[DEBUG] User '{user_id}' asked: {raw_q}")
 
+    answer = "" # Default empty answer
+    
     # --- Email Submission ---
     if re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and session_data.get('email') is None:
         session_updates['email'] = raw_q
-        _session_manager.update_session(user_id, session_updates)
-        return "🎉 **Thanks for signing up!** You'll hear from us soon. How can I help you next?"
+        answer = "🎉 **Thanks for signing up!** You'll hear from us soon. How can I help you next?"
 
-    # --- Newsletter Prompt ---
-    if (session_data.get('response_count', 0) >= 3 and session_data.get('email') is None and
-            not _waiting_for_workbook_confirmation and not _current_quiz_session and
-            not any(cleaned_q.startswith(g) for g in GREETINGS)):
-        session_updates['last_prompted_at'] = datetime.now().isoformat()
-        session_updates['response_count'] = session_data.get('response_count', 0) + 1
-        _session_manager.update_session(user_id, session_updates)
-        return (
-            "We're totally vibing! 💫 **Join our newsletter?**\n"
-            "- Early access to sustainable brand deals\n"
-            "- New eco finds and community tips\n"
-            "- Free live shopping workbook for creators/brands\n\n"
-            "**Drop your email** and I'll add you. 🌱"
-        )
-
-    response = "" # Default empty response
-    
-    # ===== Quiz handling =====
-    if _current_quiz_session:
-        if cleaned_q.isdigit():
-            response = answer_quiz_option(int(cleaned_q))
-        elif cleaned_q in ["start", "yes", "begin"]:
-            response = get_next_quiz_question()
-        else:
-            response = "Please enter the number of your choice for the quiz or type **'start'** to begin."
-
-    # ===== Routine Intent Detection & Quiz Trigger =====
-    # UPDATED: This logic is now corrected to trigger the quiz for any user,
-    # not just those who have provided an email. This is the key fix.
-    routine_type = detect_routine_intent(raw_q)
-    if not response and not _current_quiz_session and routine_type:
-        response = start_quiz(routine_type)
-
-    # ===== Quiz commands =====
-    elif cleaned_q in {"start hair quiz", "hair quiz"}:
-        response = start_quiz("hair")
-    elif cleaned_q in {"start skin quiz", "skin quiz"}:
-        response = start_quiz("skin")
-
-    # ===== Greetings =====
-    elif any(cleaned_q.startswith(g) for g in GREETINGS):
-        greeting_index = session_data.get('greeting_index', 0)
-        response = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
-        session_updates['greeting_index'] = (greeting_index + 1)
-
-    # ===== Workbook logic =====
-    elif "workbook" in cleaned_q:
-        _waiting_for_workbook_confirmation = True
-        response = "I have the *Omi Live Tactical Workbook* 📘 — do you want it in **.doc** format where you can download?"
-
-    elif _waiting_for_workbook_confirmation and cleaned_q in {"yes", "sure", "okay", "ok", "yep", "yeah"}:
-        _waiting_for_workbook_confirmation = False
-        response = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
-
-    # ===== Brand rankings =====
-    elif re.search(r"\b(rank(ing)?\s*brands?|brand\s*ranking|do\s+you\s+rank)\b", cleaned_q):
-        response = respond_list_all_brands()
-    
-    elif re.match(r"^\s*(rank|ranking)\s+(.*)$", raw_q, flags=re.IGNORECASE):
-        m = re.match(r"^\s*(rank|ranking)\s+(.*)$", raw_q, flags=re.IGNORECASE)
-        brand_candidate = m.group(2).strip()
-        if not brand_candidate:
-            response = respond_list_all_brands()
-        else:
-            candidates = fuzzy_lookup_brand_candidates(brand_candidate, top_n=5, strict=False)
-            if not candidates:
-                response = "I couldn't find that brand. Try one from my list: " + list_all_brands_str()
-            elif len(candidates) == 1:
-                response = get_brand_ranking_single(candidates[0]) or "I don't know."
+    # ===== Intent-based routing =====
+    if not answer:
+        # --- Quiz Active ---
+        if _current_quiz_session:
+            if cleaned_q.isdigit():
+                answer = answer_quiz_option(int(cleaned_q))
+            elif cleaned_q in ["start", "yes", "begin"]:
+                answer = get_next_quiz_question()
             else:
-                response = "Did you mean one of these?\n- " + "\n- ".join(candidates)
+                answer = "Please enter the number of your choice for the quiz or type **'start'** to begin."
+        
+        # --- Routine Intent & Quiz Trigger ---
+        elif detect_routine_intent(raw_q):
+            answer = start_quiz(detect_routine_intent(raw_q))
 
-    # This is a broad match, so it's placed later in the logic
-    elif len(cleaned_q.split()) <= 4:
-        brand_candidates = fuzzy_lookup_brand_candidates(raw_q, top_n=1, strict=True)
-        if brand_candidates:
-            response = get_brand_ranking_single(brand_candidates[0])
+        # --- Explicit Quiz Commands ---
+        elif cleaned_q in {"start hair quiz", "hair quiz"}:
+            answer = start_quiz("hair")
+        elif cleaned_q in {"start skin quiz", "skin quiz"}:
+            answer = start_quiz("skin")
 
-    # If any intent was matched and a response was generated, return it now
-    if response:
-        session_updates['response_count'] = session_data.get('response_count', 0) + 1
-        if session_updates:
-            _session_manager.update_session(user_id, session_updates)
-        return response
+        # --- Greetings & Workbook Offer ---
+        elif any(cleaned_q.startswith(g) for g in GREETINGS):
+            greeting_index = session_data.get('greeting_index', 0)
+            answer = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
+            _waiting_for_workbook_confirmation = True # UPDATED: Set state to wait for 'yes'
+            session_updates['greeting_index'] = (greeting_index + 1)
 
-    # ===== General RAG (Fallback) =====
-    context = retrieve_context(raw_q)
-    if not context.strip():
-        print("[INFO] No context found in FAISS. Falling back to Vertex AI.")
-        llm = get_llm()
-        try:
-            resp = llm.invoke(raw_q)
-            answer = getattr(resp, "content", None) or str(resp) or "I don't know."
-            if not re.search(r"^#{1,3}\s", answer):
-                answer = f"### ✨ Here's what I found\n\n{answer.strip()}"
-        except Exception as e:
-            print(f"[ERROR] Vertex fallback failed: {e}")
-            answer = "⚠️ Error occurred. Please try again."
-    else:
-        answer = answer_with_context(raw_q, context)
+        # --- Workbook Confirmation ---
+        elif _waiting_for_workbook_confirmation and cleaned_q in {"yes", "sure", "okay", "ok", "yep", "yeah"}:
+            _waiting_for_workbook_confirmation = False
+            answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
 
-    if any(k in cleaned_q for k in ["brand", "brands", "rank", "score", "sustainable brands"]):
-        if list_all_brands_str():
-            answer += "\n\n📊 You can ask me to rank a brand (e.g., **rank Patagonia**)."
+        # --- Brand Rankings ---
+        elif re.search(r"\b(rank(ing)?\s*brands?|brand\s*ranking|do\s+you\s+rank)\b", cleaned_q):
+            answer = respond_list_all_brands()
+        
+        elif re.match(r"^\s*(rank|ranking)\s+(.*)$", raw_q, flags=re.IGNORECASE):
+            m = re.match(r"^\s*(rank|ranking)\s+(.*)$", raw_q, flags=re.IGNORECASE)
+            brand_candidate = m.group(2).strip()
+            if not brand_candidate:
+                answer = respond_list_all_brands()
+            else:
+                candidates = fuzzy_lookup_brand_candidates(brand_candidate, top_n=5, strict=False)
+                if not candidates:
+                    answer = "I couldn't find that brand. Try one from my list: " + list_all_brands_str()
+                elif len(candidates) == 1:
+                    answer = get_brand_ranking_single(candidates[0]) or "I don't know."
+                else:
+                    answer = "Did you mean one of these?\n- " + "\n- ".join(candidates)
 
-    if "i don't know" in answer.lower() and len(cleaned_q.split()) <= 5:
-        answer = "Could you clarify your question a bit?"
+        # --- Broad match for brand names (last resort before full RAG) ---
+        elif len(cleaned_q.split()) <= 4:
+            brand_candidates = fuzzy_lookup_brand_candidates(raw_q, top_n=1, strict=True)
+            if brand_candidates:
+                answer = get_brand_ranking_single(brand_candidates[0])
 
+    # ===== General RAG (Fallback if no intent was matched) =====
+    if not answer:
+        context = retrieve_context(raw_q)
+        if not context.strip():
+            print("[INFO] No context found in FAISS. Falling back to Vertex AI.")
+            llm = get_llm()
+            try:
+                resp = llm.invoke(raw_q)
+                answer = getattr(resp, "content", None) or str(resp) or "I don't know."
+            except Exception as e:
+                print(f"[ERROR] Vertex fallback failed: {e}")
+                answer = "⚠️ Error occurred. Please try again."
+        else:
+            answer = answer_with_context(raw_q, context)
+
+        if "i don't know" in answer.lower() and len(cleaned_q.split()) <= 5:
+            answer = "I'm not quite sure how to help with that. Could you try rephrasing your question?"
+
+    # --- Newsletter Prompt (Appended to the answer) ---
+    # UPDATED: This now appends to the answer instead of replacing it, and triggers correctly.
+    if (session_data.get('response_count', 0) == 2 and session_data.get('email') is None and
+            not _current_quiz_session and not any(cleaned_q.startswith(g) for g in GREETINGS)):
+        
+        newsletter_prompt = (
+            "\n\nWe're totally vibing! 💫 **Want to join our newsletter?**\n"
+            "- Early access to sustainable brand deals\n"
+            "- New eco finds and community tips\n\n"
+            "Just drop your email to sign up! 🌱"
+        )
+        answer += newsletter_prompt
+        session_updates['last_prompted_at'] = datetime.now().isoformat()
+
+    # --- Final session updates ---
     session_updates['response_count'] = session_data.get('response_count', 0) + 1
     session_updates['interaction_count'] = session_data.get('interaction_count', 0) + 1
     if session_updates:
