@@ -345,6 +345,9 @@ def get_retriever():
         print("[INFO] Retriever built from source and saved locally.")
     return _retriever
 
+# NEW CODE
+import traceback # Make sure this is imported at the top of the file
+
 def retrieve_context(query: str, k: int = 5) -> str:
     try:
         retriever = get_retriever()
@@ -352,6 +355,7 @@ def retrieve_context(query: str, k: int = 5) -> str:
         return "\n\n".join(d.page_content for d in docs if d and d.page_content)
     except Exception as e:
         print(f"[ERROR] Retrieval failed: {e}")
+        traceback.print_exc()  # <-- ADD THIS LINE
         return ""
 
 def preload_faiss_index():
