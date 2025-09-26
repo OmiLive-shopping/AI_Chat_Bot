@@ -243,14 +243,15 @@ def _clean_text(text: str) -> str:
 # =========================
 def get_llm() -> ChatVertexAI:
     """
-    Return a ChatVertexAI instance. Try the newer model name first
-    and fallback to a more generic alias if necessary.
+    Return a ChatVertexAI instance. Prioritize faster, cheaper models for chat.
     """
     global _llm
     if _llm is not None:
         return _llm
 
-    preferred_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    # UPDATED: Prioritize gemini-1.5-flash for speed and cost-effectiveness in a chat app,
+    # with the more powerful gemini-1.5-pro as a fallback.
+    preferred_models = ["gemini-1.5-flash", "gemini-1.5-pro"] 
     for model in preferred_models:
         try:
             print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
@@ -261,6 +262,7 @@ def get_llm() -> ChatVertexAI:
                 project=GOOGLE_CLOUD_PROJECT,
                 location=GOOGLE_REGION
             )
+            # A simple invoke test to ensure the model is responsive.
             test_resp = candidate.invoke("Hello, are you online?")
             if not getattr(test_resp, "content", None):
                 print(f"[WARN] Model {model} responded with empty content. Trying next.")
@@ -276,9 +278,9 @@ def get_llm() -> ChatVertexAI:
 
 
 def get_embeddings() -> VertexAIEmbeddings:
-    # Single place to control the embedding model name
+    """Returns a consistent VertexAIEmbeddings instance."""
     try:
-        # Pass the project ID and location explicitly
+        # Using a specific, high-performance model for embeddings.
         return VertexAIEmbeddings(
             model_name="text-embedding-004",
             project=GOOGLE_CLOUD_PROJECT,
@@ -294,7 +296,7 @@ def get_embeddings() -> VertexAIEmbeddings:
 # =========================
 def build_retriever(save_local: bool = True):
     """
-    Build FAISS vectorstore from source docs (FAQ + KB).
+    Build FAISS vectorstore from source docs.
     If save_local=True, save the vectorstore to VECTORSTORE_DIR for future loads.
     """
     faq_text = _safe_read(FAQ_PATH)
@@ -302,12 +304,15 @@ def build_retriever(save_local: bool = True):
     if not faq_text and not kb_text:
         raise RuntimeError("No source text found. Ensure omi_faq.txt and omilive_knowledge_base.txt exist in data/.")
     docs = []
-    if faq_text: docs += TextLoader(FAQ_PATH, encoding="utf-8").load()
-    if kb_text: docs += TextLoader(KB_PATH, encoding="utf-8").load()
+    if faq_text: docs.extend(TextLoader(FAQ_PATH, encoding="utf-8").load())
+    if kb_text: docs.extend(TextLoader(KB_PATH, encoding="utf-8").load())
+    
     splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=80)
     chunks = splitter.split_documents(docs)
+    
     embeddings = get_embeddings()
     vect = FAISS.from_documents(chunks, embeddings)
+    
     if save_local:
         try:
             os.makedirs(VECTORSTORE_DIR, exist_ok=True)
@@ -315,16 +320,17 @@ def build_retriever(save_local: bool = True):
             print(f"[INFO] Saved FAISS vectorstore to: {VECTORSTORE_DIR}")
         except Exception as e:
             print("[WARN] Could not save FAISS vectorstore to disk:", e)
+    
     return vect.as_retriever(search_type="similarity", search_kwargs={"k": 5})
 
 def load_retriever_from_disk():
     """
     Try to load the FAISS vectorstore saved in VECTORSTORE_DIR.
-    Returns a retriever or raises on failure.
     """
     embeddings = get_embeddings()
     if not os.path.exists(VECTORSTORE_DIR):
         raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
+    
     print(f"[INFO] Loading FAISS vectorstore from disk: {VECTORSTORE_DIR}")
     vect = FAISS.load_local(VECTORSTORE_DIR, embeddings, allow_dangerous_deserialization=True)
     return vect.as_retriever(search_type="similarity", search_kwargs={"k": 5})
@@ -345,23 +351,24 @@ def get_retriever():
         print("[INFO] Retriever built from source and saved locally.")
     return _retriever
 
-# NEW CODE
-import traceback # Make sure this is imported at the top of the file
-
-def retrieve_context(query: str, k: int = 5) -> str:
+def retrieve_context(query: str) -> str:
+    """
+    Retrieves relevant document chunks from the vectorstore.
+    """
     try:
         retriever = get_retriever()
-        docs = retriever.get_relevant_documents(query)[:k]
+        # UPDATED: Use .invoke() instead of the deprecated .get_relevant_documents()
+        # This resolves the warning from your logs and aligns with modern LangChain standards.
+        docs = retriever.invoke(query)
         return "\n\n".join(d.page_content for d in docs if d and d.page_content)
     except Exception as e:
         print(f"[ERROR] Retrieval failed: {e}")
-        traceback.print_exc()  # <-- ADD THIS LINE
+        traceback.print_exc()
         return ""
 
 def preload_faiss_index():
     """
-    Public helper: ensure the retriever is initialized (load from disk or build & save).
-    Call this at container startup so first HTTP request doesn't pay the cost.
+    Public helper: ensures the retriever is initialized at startup.
     """
     print("[INFO] preload_faiss_index() called.")
     return get_retriever()
@@ -531,7 +538,7 @@ def answer_quiz_option(option_num: int) -> str:
 # =========================
 def get_quiz_recommendation(result_type: str, category: str) -> str:
     query = f"{result_type} {category} routine recommendation"
-    context = retrieve_context(query, k=3)
+    context = retrieve_context(query)
 
     llm = get_llm()
     prompt = f"""
@@ -696,11 +703,12 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     # If any intent was matched and a response was generated, return it now
     if response:
         session_updates['response_count'] = session_data.get('response_count', 0) + 1
-        _session_manager.update_session(user_id, session_updates)
+        if session_updates:
+            _session_manager.update_session(user_id, session_updates)
         return response
 
     # ===== General RAG (Fallback) =====
-    context = retrieve_context(raw_q, k=5)
+    context = retrieve_context(raw_q)
     if not context.strip():
         print("[INFO] No context found in FAISS. Falling back to Vertex AI.")
         llm = get_llm()
@@ -724,7 +732,8 @@ def get_rag_response(question: str, chat_session: Any) -> str:
 
     session_updates['response_count'] = session_data.get('response_count', 0) + 1
     session_updates['interaction_count'] = session_data.get('interaction_count', 0) + 1
-    _session_manager.update_session(user_id, session_updates)
+    if session_updates:
+        _session_manager.update_session(user_id, session_updates)
     
     return answer
 

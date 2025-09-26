@@ -4,21 +4,31 @@ import time
 import logging
 import json
 import pandas as pd
+from dotenv import load_dotenv
 
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
 
-# =========================
+# --- UPDATED: Import Vertex AI and its embedding model ---
+from langchain_google_vertexai import VertexAIEmbeddings
+import vertexai
+
+# = an======================
 # Setup logging
 # =========================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # =========================
-# Paths
+# Paths & Config
 # =========================
+load_dotenv()
+
+# --- NEW: Add GCP / Vertex AI Configuration ---
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+GOOGLE_REGION = os.getenv("GOOGLE_REGION", "us-central1").strip()
+
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
 KB_PATH = os.path.join(DATA_DIR, "omilive_knowledge_base.txt")
@@ -28,8 +38,21 @@ OMI_INTRO_PATH = os.path.join(DATA_DIR, "omi_intro.txt")
 
 VECTORSTORE_DIR = os.environ.get('VECTORSTORE_DIR', os.path.join(DATA_DIR, "omi_index"))
 
+# --- NEW: Initialize Vertex AI ---
+try:
+    if GOOGLE_CLOUD_PROJECT and GOOGLE_REGION:
+        vertexai.init(project=GOOGLE_CLOUD_PROJECT, location=GOOGLE_REGION)
+        logger.info(f"Vertex AI initialized for project: {GOOGLE_CLOUD_PROJECT}, region: {GOOGLE_REGION}")
+    else:
+        raise ValueError("GOOGLE_CLOUD_PROJECT and GOOGLE_REGION must be set in your .env file.")
+except Exception as e:
+    logger.error(f"Failed to initialize Vertex AI: {e}")
+    traceback.print_exc()
+    exit(1)
+
+
 # =========================
-# Helpers
+# Helpers (No changes needed here)
 # =========================
 def _safe_read(path: str) -> str:
     if not os.path.exists(path):
@@ -157,14 +180,16 @@ def build_faiss_index():
     chunks = splitter.split_documents(docs)
     logger.info(f"Total chunks after splitting: {len(chunks)}")
 
-    # Embeddings
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
+    # --- UPDATED: Use Vertex AI Embeddings ---
+    logger.info("Initializing Vertex AI Embeddings model...")
+    embeddings = VertexAIEmbeddings(
+        model_name="text-embedding-004",
+        project=GOOGLE_CLOUD_PROJECT,
+        location=GOOGLE_REGION
     )
 
     # Build FAISS
+    logger.info("Building FAISS index from document chunks... (This may take a moment)")
     vect = FAISS.from_documents(chunks, embeddings)
     os.makedirs(VECTORSTORE_DIR, exist_ok=True)
     vect.save_local(VECTORSTORE_DIR)
