@@ -135,6 +135,7 @@ class UserSessionManager:
             "last_prompted_at": None, "response_count": 0, "greeting_index": 0,
             "waiting_for_workbook_confirmation": False, "current_quiz_session": None,
             "quiz_answers": [], "waiting_for_quiz_start": False,
+            "waiting_for_brand_list": False,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -176,7 +177,7 @@ _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
 GREETINGS = ("hi", "hello", "hey")
 SMALL_TALK = ("how are you", "how are you doing")
-AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok"}
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please"}
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -217,11 +218,8 @@ def get_brand_df() -> pd.DataFrame:
         if not original_brand_col: return pd.DataFrame()
         
         df = df.rename(columns={original_brand_col: "brand_name"})
-        
-        # Clean all column names *after* securing the brand_name column
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
         
-        # Handle the final_score column name
         possible_score_cols = [c for c in df.columns if "final" in c and "score" in c]
         if possible_score_cols:
             df = df.rename(columns={possible_score_cols[0]: "final_score"})
@@ -268,7 +266,7 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     if df.empty: return []
     key = _make_key(user_text)
     keys = df["brand_key"].tolist()
-    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.6)
+    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.7) # Slightly higher cutoff
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
@@ -338,11 +336,14 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         else:
             session_data["current_quiz_session"] = None
             answer = "Quiz cancelled. How can I help with something else?"
-    elif session_data.get("waiting_for_quiz_start") and cleaned_q in (AFFIRMATIONS | {"start", "yes"}):
+    elif session_data.get("waiting_for_quiz_start") and cleaned_q in (AFFIRMATIONS | {"start", "start quiz"}):
         answer = start_quiz(session_data)
-    elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in {"yes", "sure", "okay", "ok", "yep", "yeah"}:
+    elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in AFFIRMATIONS:
         session_data['waiting_for_workbook_confirmation'] = False
         answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
+    elif session_data.get("waiting_for_brand_list") and cleaned_q in AFFIRMATIONS:
+        session_data['waiting_for_brand_list'] = False
+        answer = respond_list_all_brands()
 
     # --- Second Priority: Handle intents that change the state or are conversational ---
     if not answer:
@@ -357,26 +358,28 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             session_data.update({'waiting_for_workbook_confirmation': True, 'greeting_index': greeting_index + 1})
         elif cleaned_q in SMALL_TALK:
             answer = "I'm doing great, thanks for asking! Ready to help with your sustainability questions."
-        elif cleaned_q in AFFIRMATIONS:
-            answer = "Awesome! What can I help you with next? You can ask about brands, quizzes, or sustainable living tips!"
         elif re.search(r"\b(do you rank|ranking)\s*brands?\b", cleaned_q):
             answer = "Yes, I can show you how brands score based on our data! I look at things like recycled materials and worker welfare. Would you like to see the full list of brands I track?"
-            session_data['waiting_for_brand_list'] = True # Proactive state
+            session_data['waiting_for_brand_list'] = True
         elif re.search(r"\b(list|show)\s*brands?\b", cleaned_q):
             answer = respond_list_all_brands()
         elif re.match(r"^\s*rank\s+(.*)", cleaned_q):
             brand_name = re.match(r"^\s*rank\s+(.*)", cleaned_q).group(1).strip()
             answer = get_brand_ranking_single(brand_name)
-        
+
     # --- Fallback: General RAG for everything else ---
     if not answer:
+        # Reset state flags if user changes the topic
         session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False, 'waiting_for_brand_list': False})
-        # Handle single-word brand queries
+        
+        # Handle single-word brand queries better
         if len(cleaned_q.split()) <= 3:
             candidates = fuzzy_lookup_brand_candidates(raw_q)
-            if candidates:
-                answer = get_brand_ranking_single(candidates[0])
-        
+            if len(candidates) == 1:
+                answer = get_brand_ranking_single(candidates[0]) # Directly give the ranking
+            elif len(candidates) > 1:
+                 answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+
         if not answer:
             context_docs = get_retriever().invoke(raw_q)
             context = "\n\n".join(d.page_content for d in context_docs)
@@ -385,9 +388,9 @@ def get_rag_response(question: str, chat_session: Any) -> str:
                 prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
                 answer = get_llm().invoke(prompt).content
             
-            # Proactive suggestion after a general question
-            if session_data.get('response_count', 0) < 4:
-                proactive_suggestion = "\n\nBy the way, I can also rank brands on their sustainability. Just ask me to 'list brands'!"
+            # Add a proactive suggestion ONLY after a general RAG answer
+            if session_data.get('response_count', 0) % 4 == 0: # Suggest every 4 messages
+                proactive_suggestion = "\n\nBy the way, I can also create a personalized hair or skin care routine for you. Just ask!"
 
     # --- Final Step: Append Newsletter Prompt ---
     if session_data.get('response_count', 0) == 2 and not session_data.get('email'):
