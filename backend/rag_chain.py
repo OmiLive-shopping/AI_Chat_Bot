@@ -251,7 +251,7 @@ def get_llm() -> ChatVertexAI:
 
     # UPDATED: Prioritize gemini-1.5-flash for speed and cost-effectiveness in a chat app,
     # with the more powerful gemini-1.5-pro as a fallback.
-    preferred_models = ["gemini-1.5-flash", "gemini-1.5-pro"] 
+    preferred_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
     for model in preferred_models:
         try:
             print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
