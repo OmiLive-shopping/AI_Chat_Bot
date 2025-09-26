@@ -250,14 +250,15 @@ def get_llm() -> ChatVertexAI:
     if _llm is not None:
         return _llm
     
-    preferred_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"] 
+    preferred_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
     for model in preferred_models:
         try:
             print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
             candidate = ChatVertexAI(
                 model_name=model,
                 temperature=0.4,
-                max_output_tokens=512,
+                # UPDATED: Increased token limit to prevent incomplete responses.
+                max_output_tokens=1024,
                 project=GOOGLE_CLOUD_PROJECT,
                 location=GOOGLE_REGION
             )
@@ -547,7 +548,7 @@ Context:
 {context}
 
 Format the response in markdown with:
-- A clear H3 header for the routine
+- A clear bolded title for the routine (e.g., **Routine for Oily Hair**)
 - Short paragraph (1–2 sentences) summary
 - Bullet points for steps with **bold** product names
 - Optional links in [text](url) format
@@ -558,16 +559,13 @@ Response:
     try:
         resp = llm.invoke(prompt)
         text = getattr(resp, "content", None) or (str(resp) if resp is not None else None) or "I don't know."
-        text = text.strip()
-        if not re.search(r"^#{3}\s", text):
-            text = f"### 🌿 Recommended {category.capitalize()} Routine for *{result_type}*\n\n{text}"
-        return text
+        return text.strip()
     except Exception as e:
         print(f"[ERROR] LLM recommendation failed: {e}")
         return "I don't know."
 
 def finish_quiz() -> str:
-    global _current_quiz_session, _quiz_answers
+    global _current_quiz_session, _quiz_answers, _waiting_for_workbook_confirmation
     if not _quiz_answers:
         _current_quiz_session = None
         return "No answers recorded."
@@ -578,6 +576,9 @@ def finish_quiz() -> str:
     _current_quiz_session = None
     _quiz_answers = []
 
+    # UPDATED: Set the confirmation flag to true so the bot knows to expect a "yes"
+    _waiting_for_workbook_confirmation = True
+    
     return (
         f"**Your {quiz_type} type:** *{result_type}*\n\n"
         f"{recommendation}\n\n"
@@ -646,7 +647,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         elif any(cleaned_q.startswith(g) for g in GREETINGS):
             greeting_index = session_data.get('greeting_index', 0)
             answer = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
-            _waiting_for_workbook_confirmation = True # UPDATED: Set state to wait for 'yes'
+            _waiting_for_workbook_confirmation = True
             session_updates['greeting_index'] = (greeting_index + 1)
 
         # --- Workbook Confirmation ---
@@ -697,9 +698,10 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             answer = "I'm not quite sure how to help with that. Could you try rephrasing your question?"
 
     # --- Newsletter Prompt (Appended to the answer) ---
-    # UPDATED: This now appends to the answer instead of replacing it, and triggers correctly.
-    if (session_data.get('response_count', 0) == 2 and session_data.get('email') is None and
-            not _current_quiz_session and not any(cleaned_q.startswith(g) for g in GREETINGS)):
+    # UPDATED: This now triggers on the 4th message (when count is 3) and appends to the answer.
+    if (session_data.get('response_count', 0) == 3 and session_data.get('email') is None and
+            not _current_quiz_session and not any(cleaned_q.startswith(g) for g in GREETINGS) and
+            "thanks for signing up" not in answer.lower()):
         
         newsletter_prompt = (
             "\n\nWe're totally vibing! 💫 **Want to join our newsletter?**\n"
