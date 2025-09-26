@@ -64,7 +64,6 @@ BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
 WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.doc"
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
-# UPDATED: Correctly path the quizzes directory to prevent file not found errors.
 QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
 VECTORSTORE_DIR = os.environ.get('VECTORSTORE_DIR', os.path.join(DATA_DIR, "omi_index"))
 
@@ -113,7 +112,7 @@ Answer:"""
 )
 
 # =========================
-# User Session Management (UPDATED with Firestore)
+# User Session Management
 # =========================
 class UserSessionManager:
     def __init__(self, db_client):
@@ -121,13 +120,11 @@ class UserSessionManager:
         if self.db:
             self.collection_ref = self.db.collection("user_sessions")
         else:
-            # Fallback for local testing if Firestore isn't available
             self.local_sessions = {}
             print("[WARN] Firestore client is not available. Using in-memory session storage.")
 
     def get_session(self, user_id: str) -> dict:
-        """Get a user's session data from Firestore, or create a new one."""
-        if not self.db:  # Firestore unavailable fallback
+        if not self.db:
             if user_id not in self.local_sessions:
                 self.local_sessions[user_id] = self._get_default_session(user_id)
             return self.local_sessions[user_id]
@@ -136,61 +133,43 @@ class UserSessionManager:
         doc = doc_ref.get()
 
         if doc.exists:
-            session_data = doc.to_dict()
-            # Ensure legacy sessions have all needed keys
-            if 'response_count' not in session_data:
-                session_data['response_count'] = 0
-            if 'greeting_index' not in session_data:
-                session_data['greeting_index'] = 0
-            return session_data
+            return doc.to_dict()
         else:
             default_session = self._get_default_session(user_id)
             doc_ref.set(default_session)
             return default_session
 
-    def update_session(self, user_id: str, updates: dict):
-        """Update a user's session data in Firestore."""
-        if not self.db:  # Firestore unavailable fallback
-            if user_id in self.local_sessions:
-                self.local_sessions[user_id].update(updates)
+    def update_session(self, user_id: str, session_data: dict):
+        if not self.db:
+            self.local_sessions[user_id] = session_data
             return
 
         try:
             doc_ref = self.collection_ref.document(user_id)
-            doc_ref.update(updates)
+            doc_ref.set(session_data) # Overwrite the whole session to ensure consistency
         except Exception as e:
-            print(f"[ERROR] Failed to update session in Firestore for user {user_id}: {e}")
-            traceback.print_exc()
+            print(f"[ERROR] Failed to update session for user {user_id}: {e}")
 
     def _get_default_session(self, user_id: str) -> dict:
-        """Returns the default dictionary for a new user session."""
         return {
-            "user_id": user_id,
-            "interaction_count": 0,
-            "email": None,
-            "last_prompted_at": None,
-            "response_count": 0,
-            "greeting_index": 0,
+            "user_id": user_id, "interaction_count": 0, "email": None,
+            "last_prompted_at": None, "response_count": 0, "greeting_index": 0,
+            "waiting_for_workbook_confirmation": False, "current_quiz_session": None,
+            "quiz_answers": [],
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
-# Instantiate the manager with the database client
 _session_manager = UserSessionManager(db)
 
-
 def get_user_id(session: Any) -> str:
-    """Gets/sets a unique ID in the user's secure Flask session cookie."""
     if isinstance(session, dict):
         if "user_id" not in session:
             session["user_id"] = os.urandom(16).hex()
         return session["user_id"]
-    try:
-        return str(session)
-    except Exception:
-        return os.urandom(16).hex()
+    return str(session) if session else os.urandom(16).hex()
 
 # =========================
-# Routine Intent Detection
+# Core Bot Logic (Stateless Helpers)
 # =========================
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
@@ -198,555 +177,210 @@ def detect_routine_intent(question: str) -> Optional[str]:
     skin_keywords = ['skin', 'face', 'acne', 'wrinkle', 'dry skin', 'oily skin', 'routine', 'regimen', 'skincare']
     has_hair = any(word in cleaned_q for word in hair_keywords)
     has_skin = any(word in cleaned_q for word in skin_keywords)
-    if has_skin and not has_hair:
-        return 'skin'
-    elif has_hair and not has_skin:
-        return 'hair'
-    else:
-        return None
-
-# Globals created once
-_llm: Optional[ChatVertexAI] = None
-_retriever = None
-_brand_df: pd.DataFrame = pd.DataFrame()
-_waiting_for_workbook_confirmation: bool = False
-_current_quiz_session = None
-_quiz_answers = []
-GREETINGS = ("hi", "hello", "hey", "good morning", "good evening", "good afternoon")
-
-# =========================
-# Utilities
-# =========================
-def _safe_read(path: str) -> str:
-    if not os.path.exists(path):
-        print(f"[ERROR] File not found: {path}")
-        return ""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        print(f"[ERROR] Failed to read {path}: {e}")
-        traceback.print_exc()
-        return ""
-
-def _make_key(text: str) -> str:
-    s = str(text).lower()
-    s = re.sub(r"&", "and", s)
-    s = re.sub(r"[^a-z0-9\s]", " ", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
+    if has_skin and not has_hair: return 'skin'
+    if has_hair and not has_skin: return 'hair'
+    return None
 
 def _clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", str(text).lower()).strip()
 
-# =========================
-# Vertex helpers: LLM + Embeddings
-# =========================
+# Globals for stateless, expensive-to-create objects
+_llm: Optional[ChatVertexAI] = None
+_retriever = None
+_brand_df: pd.DataFrame = pd.DataFrame()
+GREETINGS = ("hi", "hello", "hey", "good morning", "good evening", "good afternoon")
+
 def get_llm() -> ChatVertexAI:
-    """
-    Return a ChatVertexAI instance. Prioritize faster, cheaper models for chat.
-    """
     global _llm
-    if _llm is not None:
-        return _llm
-    
-    preferred_models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
-    for model in preferred_models:
-        try:
-            print(f"[INFO] Attempting to initialize ChatVertexAI with model: {model}")
-            candidate = ChatVertexAI(
-                model_name=model,
-                temperature=0.4,
-                # UPDATED: Increased token limit to prevent incomplete responses.
-                max_output_tokens=1024,
-                project=GOOGLE_CLOUD_PROJECT,
-                location=GOOGLE_REGION
-            )
-            test_resp = candidate.invoke("Hello, are you online?")
-            if not getattr(test_resp, "content", None):
-                print(f"[WARN] Model {model} responded with empty content. Trying next.")
-                continue
-            _llm = candidate
-            print(f"[INFO] ChatVertexAI initialized and verified with model: {model}")
-            return _llm
-        except Exception as e:
-            print(f"[WARN] Could not initialize model {model}: {e}")
-            traceback.print_exc()
-            continue
-    raise RuntimeError("Failed to initialize any Vertex AI model. Check Vertex SDK, permissions and model availability.")
-
-
-def get_embeddings() -> VertexAIEmbeddings:
-    """Returns a consistent VertexAIEmbeddings instance."""
-    try:
-        return VertexAIEmbeddings(
-            model_name="text-embedding-004",
-            project=GOOGLE_CLOUD_PROJECT,
-            location=GOOGLE_REGION
-        )
-    except Exception as e:
-        print(f"[ERROR] Could not initialize VertexAIEmbeddings: {e}")
-        traceback.print_exc()
-        raise
-
-# =========================
-# Documents → Embeddings → Retriever
-# =========================
-def build_retriever(save_local: bool = True):
-    """
-    Build FAISS vectorstore from source docs.
-    """
-    faq_text = _safe_read(FAQ_PATH)
-    kb_text = _safe_read(KB_PATH)
-    if not faq_text and not kb_text:
-        raise RuntimeError("No source text found. Ensure omi_faq.txt and omilive_knowledge_base.txt exist in data/.")
-    docs = []
-    if faq_text: docs.extend(TextLoader(FAQ_PATH, encoding="utf-8").load())
-    if kb_text: docs.extend(TextLoader(KB_PATH, encoding="utf-8").load())
-    
-    splitter = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=80)
-    chunks = splitter.split_documents(docs)
-    
-    embeddings = get_embeddings()
-    vect = FAISS.from_documents(chunks, embeddings)
-    
-    if save_local:
-        try:
-            os.makedirs(VECTORSTORE_DIR, exist_ok=True)
-            vect.save_local(VECTORSTORE_DIR)
-            print(f"[INFO] Saved FAISS vectorstore to: {VECTORSTORE_DIR}")
-        except Exception as e:
-            print("[WARN] Could not save FAISS vectorstore to disk:", e)
-    
-    return vect.as_retriever(search_type="similarity", search_kwargs={"k": 5})
-
-def load_retriever_from_disk():
-    """
-    Try to load the FAISS vectorstore saved in VECTORSTORE_DIR.
-    """
-    embeddings = get_embeddings()
-    if not os.path.exists(VECTORSTORE_DIR):
-        raise FileNotFoundError(f"Vectorstore directory not found: {VECTORSTORE_DIR}")
-    
-    print(f"[INFO] Loading FAISS vectorstore from disk: {VECTORSTORE_DIR}")
-    vect = FAISS.load_local(VECTORSTORE_DIR, embeddings, allow_dangerous_deserialization=True)
-    return vect.as_retriever(search_type="similarity", search_kwargs={"k": 5})
+    if _llm: return _llm
+    _llm = ChatVertexAI(model_name="gemini-2.5-pro", temperature=0.4, max_output_tokens=1024)
+    return _llm
 
 def get_retriever():
-    """
-    Return the global retriever. If it's None, try to load from disk; if that fails, build it.
-    """
     global _retriever
-    if _retriever is not None:
-        return _retriever
+    if _retriever: return _retriever
+    embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
     try:
-        _retriever = load_retriever_from_disk()
-        print("[INFO] Retriever loaded from disk.")
+        vect = FAISS.load_local(VECTORSTORE_DIR, embeddings, allow_dangerous_deserialization=True)
     except Exception as e:
         print(f"[WARN] Could not load retriever from disk: {e}. Building from source...")
-        _retriever = build_retriever(save_local=True)
-        print("[INFO] Retriever built from source and saved locally.")
+        docs = TextLoader(FAQ_PATH).load() + TextLoader(KB_PATH).load()
+        chunks = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=80).split_documents(docs)
+        vect = FAISS.from_documents(chunks, embeddings)
+        vect.save_local(VECTORSTORE_DIR)
+    _retriever = vect.as_retriever(search_kwargs={"k": 5})
     return _retriever
 
-def retrieve_context(query: str) -> str:
-    """
-    Retrieves relevant document chunks from the vectorstore.
-    """
-    try:
-        retriever = get_retriever()
-        docs = retriever.invoke(query)
-        return "\n\n".join(d.page_content for d in docs if d and d.page_content)
-    except Exception as e:
-        print(f"[ERROR] Retrieval failed: {e}")
-        traceback.print_exc()
-        return ""
-
 def preload_faiss_index():
-    """
-    Public helper: ensures the retriever is initialized at startup.
-    """
-    print("[INFO] preload_faiss_index() called.")
-    return get_retriever()
-
-# =========================
-# Brand data & helpers
-# =========================
-def load_brand_df() -> pd.DataFrame:
-    if not os.path.exists(BRAND_CSV):
-        print(f"[WARN] Brand CSV not found at {BRAND_CSV}. Brand features will be disabled.")
-        return pd.DataFrame()
-    try:
-        df = pd.read_csv(BRAND_CSV)
-        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-        possible_score_cols = [c for c in df.columns if "final" in c and "score" in c]
-        if possible_score_cols:
-            df = df.rename(columns={possible_score_cols[0]: "final_score"})
-        if "brand_name" not in df.columns:
-            for c in df.columns:
-                if "brand" in c and "name" in c:
-                    df = df.rename(columns={c: "brand_name"})
-                    break
-        df = df[df["brand_name"].astype(str).str.strip().ne("")]
-        df["brand_key"] = df["brand_name"].apply(_make_key)
-        return df
-    except Exception as e:
-        print(f"[ERROR] Failed to load brand metrics: {e}")
-        return pd.DataFrame()
-
-def get_brand_df() -> pd.DataFrame:
-    global _brand_df
-    if _brand_df.empty:
-        _brand_df = load_brand_df()
-    return _brand_df
-
-def list_all_brands() -> List[str]:
-    df = get_brand_df()
-    if df.empty or "brand_name" not in df.columns:
-        return []
-    return sorted({str(b).strip() for b in df["brand_name"].dropna() if str(b).strip()})
-
-def list_all_brands_str() -> str:
-    return ", ".join(list_all_brands())
-
-def fuzzy_lookup_brand_candidates(user_text: str, top_n: int = 5, strict: bool = False) -> List[str]:
-    df = get_brand_df()
-    if df.empty:
-        return []
-    key = _make_key(user_text)
-    keys = df["brand_key"].tolist()
-    cutoff = 0.85 if strict else 0.5
-    matches = difflib.get_close_matches(key, keys, n=top_n, cutoff=cutoff)
-    if not matches and len(key) >= 3:
-        subset = df[df["brand_key"].str.contains(re.escape(key))]
-        if not subset.empty:
-            return subset["brand_name"].tolist()[:top_n]
-    return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
-
-def get_brand_ranking_single(best_name: str) -> str:
-    df = get_brand_df()
-    if df.empty:
-        return ""
-    key = _make_key(best_name)
-    matched = df[df["brand_key"] == key]
-    if matched.empty:
-        matched = df[df["brand_key"].str.contains(re.escape(key))]
-        if matched.empty:
-            return ""
-    row = matched.iloc[0]
-    score = row.get("final_score", "N/A")
-    breakdown_cols = [
-        "recycled/upcycled_materials",
-        "end_of_life_solutions_(compostable_packaging/zero_waste)",
-        "worker_welfare/living_wage",
-        "local_sourcing",
-        "sustainability_data_accessibility",
-        "marketing_honesty/_certifications",
-    ]
-    breakdown_text = []
-    for col in breakdown_cols:
-        if col in df.columns and pd.notna(row.get(col, None)):
-            label = col.replace("_", " ").title()
-            breakdown_text.append(f"- {label}: {row[col]}")
-    breakdown = "\n".join(breakdown_text)
-    if breakdown:
-        breakdown = f"\n\n**Breakdown:**\n{breakdown}"
+    """Public helper to ensure the retriever is initialized at startup."""
+    print("[INFO] Preloading FAISS index...")
+    get_retriever()
+    print("[INFO] FAISS index is ready.")
     
-    response = f"🌍 *{row['brand_name']}* — Sustainability score **{score} / 30**.{breakdown}"
-    response += "\n\nWould you like me to rank another brand?" # More interactive
-    return response
-
-def respond_list_all_brands() -> str:
-    brands_str = list_all_brands_str()
-    if not brands_str:
-        return "I don't currently have brand rankings in my dataset."
-    return "📊 **Yes! I track these brands:**\n" + brands_str + "\n\nJust ask me to 'rank [brand name]'."
-
 # =========================
-# Quiz JSON loader
+# Quiz Logic (Now fully session-based)
 # =========================
-def load_quiz(file_name: str) -> dict:
-    path = os.path.join(QUIZZES_DIR, file_name)
-    if not os.path.exists(path):
-        print(f"[ERROR] Quiz file not found: {path}")
-        return {}
+def start_quiz(session_data: dict, quiz_type: str) -> str:
+    # Reset any previous quiz state before starting a new one
+    session_data["current_quiz_session"] = None
+    session_data["quiz_answers"] = []
+
+    quiz_file = "hair.json" if quiz_type == "hair" else "skin.json"
+    path = os.path.join(QUIZZES_DIR, quiz_file)
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except json.JSONDecodeError as e:
-        print(f"[ERROR] Malformed quiz JSON {path}: {e}")
-        return {}
-    except Exception as e:
-        print(f"[ERROR] Could not load quiz {path}: {e}")
-        return {}
-
-# =========================
-# Quiz logic
-# =========================
-def start_quiz(quiz_type: str) -> str:
-    global _current_quiz_session, _quiz_answers
-    quiz_file = "hair.json" if quiz_type == "hair" else "skin.json"
-    quiz_data = load_quiz(quiz_file)
-    if not quiz_data:
-        # Give a more helpful error message to the user
-        return "I'm sorry, my quiz materials seem to be missing at the moment. I can still answer other questions about sustainable living!"
-    _current_quiz_session = {
-        "quiz_data": quiz_data,
-        "question_idx": 0,
-        "quiz_type": quiz_type
+            quiz_data = json.load(f)
+    except Exception:
+        return "I'm sorry, my quiz materials are missing. I can still answer other questions!"
+    
+    session_data["current_quiz_session"] = {
+        "quiz_data": quiz_data, "question_idx": 0, "quiz_type": quiz_type
     }
-    _quiz_answers = []
-    return (
-        f"### ✨ {quiz_type.capitalize()} Routine Quiz\n"
-        f"I can definitely help with a {quiz_type} routine! To personalize it,\n"
-        f"I'll ask a few quick questions.\n\n"
-        f"**Ready to start the {quiz_type} quiz?** Type **'start'** to begin!"
-    )
+    
+    return (f"**✨ {quiz_type.capitalize()} Routine Quiz**\n"
+            f"I can definitely help! To personalize it, I'll ask a few quick questions.\n\n"
+            f"**Ready to start?** Type **'start'** to begin!")
 
-def get_next_quiz_question() -> str:
-    global _current_quiz_session
-    if not _current_quiz_session:
-        return "No active quiz."
-    idx = _current_quiz_session["question_idx"]
-    questions = _current_quiz_session["quiz_data"]["questions"]
+def get_next_quiz_question(session_data: dict) -> str:
+    quiz_session = session_data["current_quiz_session"]
+    if not quiz_session: return "No active quiz."
+    idx = quiz_session["question_idx"]
+    questions = quiz_session["quiz_data"]["questions"]
     if idx >= len(questions):
-        return finish_quiz()
-
+        return finish_quiz(session_data)
     q = questions[idx]
     options_text = "\n".join([f"{i+1}. {opt['text']}" for i, opt in enumerate(q["options"])])
     return f"**Q{q['id']}**: {q['question']}\n{options_text}"
 
-def answer_quiz_option(option_num: int) -> str:
-    global _current_quiz_session, _quiz_answers
-    if not _current_quiz_session:
-        return "No active quiz."
-    questions = _current_quiz_session["quiz_data"]["questions"]
-    idx = _current_quiz_session["question_idx"]
-    if idx >= len(questions):
-        return finish_quiz()
-
-    q = questions[idx]
+def answer_quiz_option(session_data: dict, option_num: int) -> str:
+    quiz_session = session_data.get("current_quiz_session")
+    if not quiz_session: return "No active quiz."
+    idx = quiz_session["question_idx"]
+    q = quiz_session["quiz_data"]["questions"][idx]
     if 1 <= option_num <= len(q["options"]):
-        _quiz_answers.append(q["options"][option_num-1]["type"])
-        _current_quiz_session["question_idx"] += 1
-        return get_next_quiz_question()
+        session_data["quiz_answers"].append(q["options"][option_num-1]["type"])
+        quiz_session["question_idx"] += 1
+        return get_next_quiz_question(session_data)
     else:
         return f"Invalid choice. Please select a number between 1 and {len(q['options'])}."
 
-# =========================
-# Quiz recommendation helper (Markdown-formatted)
-# =========================
-def get_quiz_recommendation(result_type: str, category: str) -> str:
-    query = f"{result_type} {category} routine recommendation"
-    context = retrieve_context(query)
+def finish_quiz(session_data: dict) -> str:
+    quiz_answers = session_data.get("quiz_answers", [])
+    quiz_session = session_data.get("current_quiz_session")
+    if not quiz_answers or not quiz_session:
+        session_data["current_quiz_session"] = None
+        return "Quiz ended without answers."
 
-    llm = get_llm()
-    prompt = f"""
-You are OMI. Based on the context below, recommend products and a routine for {category} type: {result_type}.
-Be concise, practical, and friendly. Only use the information provided in the context.
-
-Context:
-{context}
-
-Format the response in markdown with:
-- A clear bolded title for the routine (e.g., **Routine for Oily Hair**)
-- Short paragraph (1–2 sentences) summary
-- Bullet points for steps with **bold** product names
-- Optional links in [text](url) format
-- Finish with a short tip block prefixed by "💡 Tip:"
-
-Response:
-"""
-    try:
-        resp = llm.invoke(prompt)
-        text = getattr(resp, "content", None) or (str(resp) if resp is not None else None) or "I don't know."
-        return text.strip()
-    except Exception as e:
-        print(f"[ERROR] LLM recommendation failed: {e}")
-        return "I don't know."
-
-def finish_quiz() -> str:
-    global _current_quiz_session, _quiz_answers, _waiting_for_workbook_confirmation
-    if not _quiz_answers:
-        _current_quiz_session = None
-        return "No answers recorded."
-
-    result_type = Counter(_quiz_answers).most_common(1)[0][0]
-    quiz_type = _current_quiz_session["quiz_type"]
-    recommendation = get_quiz_recommendation(result_type, quiz_type)
-    _current_quiz_session = None
-    _quiz_answers = []
-
-    # UPDATED: Set the confirmation flag to true so the bot knows to expect a "yes"
-    _waiting_for_workbook_confirmation = True
+    result_type = Counter(quiz_answers).most_common(1)[0][0]
+    quiz_type = quiz_session["quiz_type"]
     
-    return (
-        f"**Your {quiz_type} type:** *{result_type}*\n\n"
-        f"{recommendation}\n\n"
-        f"📘 Want me to send the *Omi Live Tactical Workbook* for **{quiz_type}** care?"
-    )
-
-# =========================
-# Core RAG answer
-# =========================
-def answer_with_context(question: str, context: str) -> str:
+    # Generate recommendation
+    context = get_retriever().invoke(f"{result_type} {quiz_type} routine recommendation")
+    context_str = "\n\n".join(d.page_content for d in context)
     llm = get_llm()
-    prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=question)
-    try:
-        resp = llm.invoke(prompt)
-        text = getattr(resp, "content", None) or (str(resp) if resp is not None else "I don't know.")
-        return text.strip()
-    except Exception as e:
-        print(f"[ERROR] LLM invocation failed: {e}")
-        return "⚠️ Error generating an answer."
+    prompt = f"You are OMI. Based on this context, recommend a routine for {quiz_type} type: {result_type}.\n\nContext: {context_str}"
+    recommendation = llm.invoke(prompt).content
 
+    # Clean up session state
+    session_data["current_quiz_session"] = None
+    session_data["quiz_answers"] = []
+    session_data["waiting_for_workbook_confirmation"] = True
+    
+    return (f"**Your {quiz_type} type:** *{result_type}*\n\n"
+            f"{recommendation}\n\n"
+            f"📘 Want me to send the *Omi Live Tactical Workbook* for **{quiz_type}** care?")
+
+# =========================
+# Main Response Generator (Rewritten Logic)
+# =========================
 def get_rag_response(question: str, chat_session: Any) -> str:
-    global _waiting_for_workbook_confirmation
-
-    # --- Session Management ---
     user_id = get_user_id(chat_session)
     session_data = _session_manager.get_session(user_id)
     
-    session_updates = {}
-
-    if not question or not str(question).strip():
-        return "I don't know."
-
     raw_q = str(question).strip()
+    if not raw_q: return "I don't know."
     cleaned_q = _clean_text(raw_q)
-    print(f"[DEBUG] User '{user_id}' asked: {raw_q}")
+    print(f"[DEBUG] User '{user_id}' asked: '{raw_q}', Session: {session_data}")
 
-    answer = "" # Default empty answer
-    
-    # --- Email Submission ---
-    if re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and session_data.get('email') is None:
-        session_updates['email'] = raw_q
-        answer = "🎉 **Thanks for signing up!** You'll hear from us soon. How can I help you next?"
+    answer = ""
 
-    # ===== Intent-based routing =====
+    # --- STATEFUL INTENT HANDLING (HIGHEST PRIORITY) ---
+    # 1. Handle ongoing quiz answers
+    if session_data.get("current_quiz_session"):
+        if cleaned_q.isdigit():
+            answer = answer_quiz_option(session_data, int(cleaned_q))
+        elif cleaned_q in ["start", "yes", "begin"]:
+            answer = get_next_quiz_question(session_data)
+        else: # If user asks something else, end the quiz
+            session_data["current_quiz_session"] = None
+            answer = "Quiz cancelled. How can I help you?"
+
+    # 2. Handle follow-up confirmation for workbook
+    elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in {"yes", "sure", "okay", "ok", "yep", "yeah"}:
+        session_data['waiting_for_workbook_confirmation'] = False
+        answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
+
+    # --- STATE-CHANGING INTENT HANDLING ---
     if not answer:
-        # --- Quiz Active ---
-        if _current_quiz_session:
-            if cleaned_q.isdigit():
-                answer = answer_quiz_option(int(cleaned_q))
-            elif cleaned_q in ["start", "yes", "begin"]:
-                answer = get_next_quiz_question()
-            else:
-                answer = "Please enter the number of your choice for the quiz or type **'start'** to begin."
+        # 3. Detect intent to start a new quiz
+        routine_type = detect_routine_intent(raw_q)
+        if routine_type:
+            answer = start_quiz(session_data, routine_type)
         
-        # --- Routine Intent & Quiz Trigger ---
-        elif detect_routine_intent(raw_q):
-            answer = start_quiz(detect_routine_intent(raw_q))
-
-        # --- Explicit Quiz Commands ---
-        elif cleaned_q in {"start hair quiz", "hair quiz"}:
-            answer = start_quiz("hair")
-        elif cleaned_q in {"start skin quiz", "skin quiz"}:
-            answer = start_quiz("skin")
-
-        # --- Greetings & Workbook Offer ---
+        # 4. Handle email submission
+        elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and not session_data.get('email'):
+            session_data['email'] = raw_q
+            answer = "🎉 **Thanks for signing up!** You'll hear from us soon. What can I help you next?"
+        
+        # 5. Handle greetings
         elif any(cleaned_q.startswith(g) for g in GREETINGS):
             greeting_index = session_data.get('greeting_index', 0)
             answer = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
-            _waiting_for_workbook_confirmation = True
-            session_updates['greeting_index'] = (greeting_index + 1)
+            session_data['waiting_for_workbook_confirmation'] = True
+            session_data['greeting_index'] = greeting_index + 1
 
-        # --- Workbook Confirmation ---
-        elif _waiting_for_workbook_confirmation and cleaned_q in {"yes", "sure", "okay", "ok", "yep", "yeah"}:
-            _waiting_for_workbook_confirmation = False
-            answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
-
-        # --- Brand Rankings ---
-        elif re.search(r"\b(rank(ing)?\s*brands?|brand\s*ranking|do\s+you\s+rank)\b", cleaned_q):
-            answer = respond_list_all_brands()
-        
-        elif re.match(r"^\s*(rank|ranking)\s+(.*)$", raw_q, flags=re.IGNORECASE):
-            m = re.match(r"^\s*(rank|ranking)\s+(.*)$", raw_q, flags=re.IGNORECASE)
-            brand_candidate = m.group(2).strip()
-            if not brand_candidate:
-                answer = respond_list_all_brands()
-            else:
-                candidates = fuzzy_lookup_brand_candidates(brand_candidate, top_n=5, strict=False)
-                if not candidates:
-                    answer = "I couldn't find that brand. Try one from my list: " + list_all_brands_str()
-                elif len(candidates) == 1:
-                    answer = get_brand_ranking_single(candidates[0]) or "I don't know."
-                else:
-                    answer = "Did you mean one of these?\n- " + "\n- ".join(candidates)
-
-        # --- Broad match for brand names (last resort before full RAG) ---
-        elif len(cleaned_q.split()) <= 4:
-            brand_candidates = fuzzy_lookup_brand_candidates(raw_q, top_n=1, strict=True)
-            if brand_candidates:
-                answer = get_brand_ranking_single(brand_candidates[0])
-
-    # ===== General RAG (Fallback if no intent was matched) =====
+    # --- GENERAL RAG (FALLBACK) ---
     if not answer:
-        context = retrieve_context(raw_q)
-        if not context.strip():
-            print("[INFO] No context found in FAISS. Falling back to Vertex AI.")
-            llm = get_llm()
-            try:
-                resp = llm.invoke(raw_q)
-                answer = getattr(resp, "content", None) or str(resp) or "I don't know."
-            except Exception as e:
-                print(f"[ERROR] Vertex fallback failed: {e}")
-                answer = "⚠️ Error occurred. Please try again."
+        # Reset any leftover confirmation state if user asks something else
+        session_data['waiting_for_workbook_confirmation'] = False
+        
+        context_docs = get_retriever().invoke(raw_q)
+        context = "\n\n".join(d.page_content for d in context_docs)
+        if not context:
+            answer = get_llm().invoke(raw_q).content
         else:
-            answer = answer_with_context(raw_q, context)
+            prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+            answer = get_llm().invoke(prompt).content
 
-        if "i don't know" in answer.lower() and len(cleaned_q.split()) <= 5:
+        if "i don't know" in answer.lower() and len(cleaned_q.split()) <= 4:
             answer = "I'm not quite sure how to help with that. Could you try rephrasing your question?"
 
-    # --- Newsletter Prompt (Appended to the answer) ---
-    # UPDATED: This now triggers on the 4th message (when count is 3) and appends to the answer.
-    if (session_data.get('response_count', 0) == 3 and session_data.get('email') is None and
-            not _current_quiz_session and not any(cleaned_q.startswith(g) for g in GREETINGS) and
-            "thanks for signing up" not in answer.lower()):
-        
-        newsletter_prompt = (
+    # --- APPEND NEWSLETTER PROMPT (FINAL STEP) ---
+    # Trigger on the 3rd user message (response_count is 2 before incrementing)
+    if (session_data.get('response_count', 0) == 2 and not session_data.get('email')):
+        answer += (
             "\n\nWe're totally vibing! 💫 **Want to join our newsletter?**\n"
             "- Early access to sustainable brand deals\n"
             "- New eco finds and community tips\n\n"
             "Just drop your email to sign up! 🌱"
         )
-        answer += newsletter_prompt
-        session_updates['last_prompted_at'] = datetime.now().isoformat()
+        session_data['last_prompted_at'] = datetime.now().isoformat()
 
-    # --- Final session updates ---
-    session_updates['response_count'] = session_data.get('response_count', 0) + 1
-    session_updates['interaction_count'] = session_data.get('interaction_count', 0) + 1
-    if session_updates:
-        _session_manager.update_session(user_id, session_updates)
+    # --- FINALIZE AND SAVE SESSION ---
+    session_data['response_count'] = session_data.get('response_count', 0) + 1
+    _session_manager.update_session(user_id, session_data)
     
     return answer
 
-# =========================
-# CLI test
-# =========================
+# CLI test function
 if __name__ == "__main__":
-    import sys
-    print("[INFO] Preloading FAISS index for CLI...")
-    try:
-        preload_faiss_index()
-        print("[INFO] ✅ FAISS index ready.")
-    except Exception as e:
-        print(f"[ERROR] ❌ Failed to preload FAISS index: {e}")
-        sys.exit(1)
-
-    print("🔍 Testing LLM connectivity...")
-    try:
-        llm = get_llm()
-        ping = llm.invoke("Hello, are you online?")
-        print("[TEST] Gemini working ✅:", bool(getattr(ping, "content", "")))
-    except Exception as e:
-        print("❌ Gemini failed:", e)
-        sys.exit(1)
-
-    print("\n🤖 OMI Bot is ready! Start chatting (type 'quit' to exit).")
+    preload_faiss_index()
+    print("🤖 OMI Bot is ready!")
+    # Use a mock session object for CLI
+    cli_session = {"user_id": "cli_user"}
     while True:
         user_input = input("\nYou: ").strip()
-        if user_input.lower() in ['quit', 'exit', 'bye']:
-            break
-        response = get_rag_response(user_input, "cli_user")
+        if user_input.lower() in ['quit', 'exit']: break
+        response = get_rag_response(user_input, cli_session)
         print(f"OMI: {response}")
 
