@@ -204,10 +204,32 @@ def get_brand_df() -> pd.DataFrame:
     global _brand_df
     if not _brand_df.empty: return _brand_df
     if not os.path.exists(BRAND_CSV): return pd.DataFrame()
-    _brand_df = pd.read_csv(BRAND_CSV)
-    _brand_df.columns = [_make_key(c) for c in _brand_df.columns]
-    _brand_df["brand_key"] = _brand_df["brand_name"].apply(_make_key)
-    return _brand_df
+    
+    # UPDATED: This logic is now corrected to prevent the KeyError.
+    try:
+        df = pd.read_csv(BRAND_CSV)
+        # Find the original brand name column before cleaning all column names
+        original_brand_col = next((col for col in df.columns if 'brand' in col.lower() and 'name' in col.lower()), None)
+        if not original_brand_col:
+            print("[ERROR] 'Brand Name' column not found in CSV.")
+            return pd.DataFrame()
+
+        # Clean all column names
+        df.columns = [_make_key(c) for c in df.columns]
+        cleaned_brand_col = _make_key(original_brand_col)
+
+        # Rename the cleaned brand column to a consistent 'brand_name' for downstream use
+        df = df.rename(columns={cleaned_brand_col: "brand_name"})
+
+        # Now create the brand_key from the consistent 'brand_name' column
+        df["brand_key"] = df["brand_name"].apply(_make_key)
+        
+        _brand_df = df
+        return _brand_df
+    except Exception as e:
+        print(f"[ERROR] Failed to load or process brand CSV: {e}")
+        return pd.DataFrame()
+
 
 def respond_list_all_brands() -> str:
     df = get_brand_df()
@@ -217,7 +239,7 @@ def respond_list_all_brands() -> str:
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     df = get_brand_df()
-    if df.empty: return []
+    if df.empty or "brand_key" not in df.columns: return [] # Added safety check
     key = _make_key(user_text)
     keys = df["brand_key"].tolist()
     matches = difflib.get_close_matches(key, keys, n=5, cutoff=0.6)
