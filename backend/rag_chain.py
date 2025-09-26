@@ -114,7 +114,11 @@ class UserSessionManager:
             return self.local_sessions[user_id]
         doc_ref = self.collection_ref.document(user_id)
         doc = doc_ref.get()
-        return doc.to_dict() if doc.exists else self._get_default_session(user_id)
+        if not doc.exists:
+            default_session = self._get_default_session(user_id)
+            self.update_session(user_id, default_session)
+            return default_session
+        return doc.to_dict()
 
     def update_session(self, user_id: str, session_data: dict):
         if not self.db:
@@ -170,7 +174,8 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
-GREETINGS = ("hi", "hello", "hey", "good morning", "good evening", "good afternoon")
+GREETINGS = ("hi", "hello", "hey")
+SMALL_TALK = ("how are you", "how are you doing", "sounds good", "awesome", "perfect", "great")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -195,41 +200,54 @@ def get_retriever():
 def preload_faiss_index():
     print("[INFO] Preloading FAISS index...")
     get_retriever()
-    print("[INFO] FAISS index is ready.")
+    get_brand_df() # Also preload brand data
+    print("[INFO] FAISS index and brand data are ready.")
 
 # =========================
-# Brand Logic
+# Brand Logic (Restored from previous version)
 # =========================
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
     if not _brand_df.empty: return _brand_df
     if not os.path.exists(BRAND_CSV): return pd.DataFrame()
-    
-    # UPDATED: This logic is now corrected to prevent the KeyError.
     try:
         df = pd.read_csv(BRAND_CSV)
-        # Find the original brand name column before cleaning all column names
         original_brand_col = next((col for col in df.columns if 'brand' in col.lower() and 'name' in col.lower()), None)
-        if not original_brand_col:
-            print("[ERROR] 'Brand Name' column not found in CSV.")
-            return pd.DataFrame()
-
-        # Clean all column names
-        df.columns = [_make_key(c) for c in df.columns]
-        cleaned_brand_col = _make_key(original_brand_col)
-
-        # Rename the cleaned brand column to a consistent 'brand_name' for downstream use
-        df = df.rename(columns={cleaned_brand_col: "brand_name"})
-
-        # Now create the brand_key from the consistent 'brand_name' column
-        df["brand_key"] = df["brand_name"].apply(_make_key)
+        if not original_brand_col: return pd.DataFrame()
         
-        _brand_df = df
+        df = df.rename(columns={original_brand_col: "brand_name"})
+        df.columns = [_make_key(c) for c in df.columns]
+        
+        df["brand_key"] = df["brand_name"].apply(_make_key)
+        _brand_df = df.dropna(subset=['brand_name'])
         return _brand_df
     except Exception as e:
         print(f"[ERROR] Failed to load or process brand CSV: {e}")
         return pd.DataFrame()
 
+def get_brand_ranking_single(brand_name: str) -> str:
+    df = get_brand_df()
+    if df.empty: return "I don't have brand ranking information available right now."
+    key = _make_key(brand_name)
+    row = df[df["brand_key"] == key]
+    if row.empty: return f"I couldn't find a ranking for '{brand_name}'. Try asking me to 'list brands' to see who I track!"
+    
+    row = row.iloc[0]
+    score = row.get('finalscore', 'N/A') # Use cleaned column name
+    
+    # Dynamically find breakdown columns (assuming they are between brand_name and finalscore)
+    try:
+        start_index = df.columns.get_loc('brand_name') + 1
+        end_index = df.columns.get_loc('finalscore')
+        breakdown_cols = df.columns[start_index:end_index]
+        breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if pd.notna(row[col])]
+    except KeyError:
+        breakdown = []
+
+    response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
+    if breakdown:
+        response += "\n\n" + "\n".join(breakdown)
+    return response
 
 def respond_list_all_brands() -> str:
     df = get_brand_df()
@@ -237,12 +255,13 @@ def respond_list_all_brands() -> str:
     brands = sorted(df["brand_name"].dropna().unique())
     return "📊 **Yes! I track these brands:**\n" + ", ".join(brands)
 
-def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
+def fuzzy_lookup_brand_candidates(user_text: str, strict: bool = False) -> List[str]:
     df = get_brand_df()
-    if df.empty or "brand_key" not in df.columns: return [] # Added safety check
+    if df.empty or "brand_key" not in df.columns: return []
     key = _make_key(user_text)
     keys = df["brand_key"].tolist()
-    matches = difflib.get_close_matches(key, keys, n=5, cutoff=0.6)
+    cutoff = 0.85 if strict else 0.6
+    matches = difflib.get_close_matches(key, keys, n=5, cutoff=cutoff)
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
@@ -255,7 +274,6 @@ def start_quiz(session_data: dict, quiz_type: str) -> str:
             quiz_data = json.load(f)
     except Exception:
         return "I'm sorry, my quiz materials are missing. I can still help with other questions!"
-    
     session_data["current_quiz_session"] = {"quiz_data": quiz_data, "question_idx": 0, "quiz_type": quiz_type}
     return (f"**✨ {quiz_type.capitalize()} Routine Quiz**\n"
             f"I can definitely help! To personalize it, I'll ask a few quick questions.\n\n"
@@ -272,7 +290,7 @@ def get_next_quiz_question(session_data: dict) -> str:
 
 def answer_quiz_option(session_data: dict, option_num: int) -> str:
     quiz_session = session_data["current_quiz_session"]
-    idx, q = quiz_session["question_idx"], quiz_session["quiz_data"]["questions"][quiz_session["question_idx"]]
+    q = quiz_session["quiz_data"]["questions"][quiz_session["question_idx"]]
     if 1 <= option_num <= len(q["options"]):
         session_data["quiz_answers"].append(q["options"][option_num-1]["type"])
         quiz_session["question_idx"] += 1
@@ -298,7 +316,6 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     if not raw_q: return "I don't know."
     cleaned_q = _clean_text(raw_q)
     print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
-
     answer = ""
     # --- Highest Priority: Handle ongoing stateful conversations ---
     if session_data.get("current_quiz_session"):
@@ -311,7 +328,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         session_data['waiting_for_workbook_confirmation'] = False
         answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
 
-    # --- Second Priority: Handle intents that change the state ---
+    # --- Second Priority: Handle intents that change the state or are conversational ---
     if not answer:
         routine_type = detect_routine_intent(raw_q)
         if routine_type: answer = start_quiz(session_data, routine_type)
@@ -322,32 +339,37 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             greeting_index = session_data.get('greeting_index', 0)
             answer = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
             session_data.update({'waiting_for_workbook_confirmation': True, 'greeting_index': greeting_index + 1})
-        elif cleaned_q in ["how are you", "how are you doing"]:
-            answer = "I'm doing great, thanks for asking! I'm ready to help you with your sustainability questions. What's on your mind?"
-        elif re.search(r"\b(rank|list)\s*brands?\b", cleaned_q):
+        elif cleaned_q in SMALL_TALK:
+            answer = "I'm doing great, thanks for asking! Ready to help with your sustainability questions."
+        elif re.search(r"\b(list|show)\s*brands?\b", cleaned_q):
             answer = respond_list_all_brands()
-        elif len(cleaned_q.split()) <= 4: # Fuzzy match for brand names
-            candidates = fuzzy_lookup_brand_candidates(raw_q)
+        elif re.match(r"^\s*rank\s+(.*)", cleaned_q):
+            brand_name = re.match(r"^\s*rank\s+(.*)", cleaned_q).group(1).strip()
+            candidates = fuzzy_lookup_brand_candidates(brand_name, strict=True)
             if len(candidates) == 1:
-                # This part can be enhanced to show the ranking details. For now, a simple confirmation.
-                answer = f"Yes, {candidates[0]} is one of the brands I track. You can ask me to rank it specifically!"
+                answer = get_brand_ranking_single(candidates[0])
             elif len(candidates) > 1:
                 answer = "Did you mean one of these brands?\n- " + "\n- ".join(candidates)
-
+            else:
+                answer = get_brand_ranking_single(brand_name) # Attempt a direct match anyway
 
     # --- Fallback: General RAG for everything else ---
     if not answer:
-        session_data['waiting_for_workbook_confirmation'] = False # Reset state if user changes topic
-        context_docs = get_retriever().invoke(raw_q)
-        context = "\n\n".join(d.page_content for d in context_docs)
-        if not context: answer = get_llm().invoke(raw_q).content
+        session_data['waiting_for_workbook_confirmation'] = False
+        if len(cleaned_q.split()) <= 3:
+            candidates = fuzzy_lookup_brand_candidates(raw_q)
+            if candidates:
+                answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+            else:
+                answer = "I'm not sure I understand. Could you please provide more details?"
         else:
-            prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-            answer = get_llm().invoke(prompt).content
-        
-        if cleaned_q in ["awesome", "perfect", "great", "thanks", "thank you"]:
-            answer = "You're very welcome! Glad I could help. Is there anything else you're curious about?"
-
+            context_docs = get_retriever().invoke(raw_q)
+            context = "\n\n".join(d.page_content for d in context_docs)
+            if not context: answer = get_llm().invoke(raw_q).content
+            else:
+                prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+                answer = get_llm().invoke(prompt).content
+    
     # --- Final Step: Append Newsletter Prompt ---
     if session_data.get('response_count', 0) == 2 and not session_data.get('email'):
         answer += "\n\nWe're totally vibing! 💫 **Want to join our newsletter?** Just drop your email to sign up! 🌱"
