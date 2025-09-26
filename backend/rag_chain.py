@@ -134,7 +134,7 @@ class UserSessionManager:
             "user_id": user_id, "interaction_count": 0, "email": None,
             "last_prompted_at": None, "response_count": 0, "greeting_index": 0,
             "waiting_for_workbook_confirmation": False, "current_quiz_session": None,
-            "quiz_answers": [],
+            "quiz_answers": [], "waiting_for_quiz_start": False,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -175,7 +175,8 @@ _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
 GREETINGS = ("hi", "hello", "hey")
-SMALL_TALK = ("how are you", "how are you doing", "sounds good", "awesome", "perfect", "great")
+SMALL_TALK = ("how are you", "how are you doing")
+AFFIRMATIONS = ("sounds good", "awesome", "perfect", "great", "okay", "ok")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -204,7 +205,7 @@ def preload_faiss_index():
     print("[INFO] FAISS index and brand data are ready.")
 
 # =========================
-# Brand Logic (Restored from previous version)
+# Brand Logic
 # =========================
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
@@ -214,10 +215,8 @@ def get_brand_df() -> pd.DataFrame:
         df = pd.read_csv(BRAND_CSV)
         original_brand_col = next((col for col in df.columns if 'brand' in col.lower() and 'name' in col.lower()), None)
         if not original_brand_col: return pd.DataFrame()
-        
         df = df.rename(columns={original_brand_col: "brand_name"})
         df.columns = [_make_key(c) for c in df.columns]
-        
         df["brand_key"] = df["brand_name"].apply(_make_key)
         _brand_df = df.dropna(subset=['brand_name'])
         return _brand_df
@@ -231,19 +230,15 @@ def get_brand_ranking_single(brand_name: str) -> str:
     key = _make_key(brand_name)
     row = df[df["brand_key"] == key]
     if row.empty: return f"I couldn't find a ranking for '{brand_name}'. Try asking me to 'list brands' to see who I track!"
-    
     row = row.iloc[0]
-    score = row.get('finalscore', 'N/A') # Use cleaned column name
-    
-    # Dynamically find breakdown columns (assuming they are between brand_name and finalscore)
+    score = row.get('finalscore', 'N/A')
     try:
-        start_index = df.columns.get_loc('brand_name') + 1
+        start_index = df.columns.get_loc('brandname') + 1
         end_index = df.columns.get_loc('finalscore')
         breakdown_cols = df.columns[start_index:end_index]
         breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if pd.notna(row[col])]
     except KeyError:
         breakdown = []
-
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
     if breakdown:
         response += "\n\n" + "\n".join(breakdown)
@@ -255,31 +250,37 @@ def respond_list_all_brands() -> str:
     brands = sorted(df["brand_name"].dropna().unique())
     return "📊 **Yes! I track these brands:**\n" + ", ".join(brands)
 
-def fuzzy_lookup_brand_candidates(user_text: str, strict: bool = False) -> List[str]:
+def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     df = get_brand_df()
-    if df.empty or "brand_key" not in df.columns: return []
+    if df.empty: return []
     key = _make_key(user_text)
     keys = df["brand_key"].tolist()
-    cutoff = 0.85 if strict else 0.6
-    matches = difflib.get_close_matches(key, keys, n=5, cutoff=cutoff)
+    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.6)
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
 # Quiz Logic
 # =========================
-def start_quiz(session_data: dict, quiz_type: str) -> str:
-    session_data.update({"current_quiz_session": None, "quiz_answers": []})
+def offer_quiz(session_data: dict, quiz_type: str) -> str:
+    session_data["waiting_for_quiz_start"] = True
+    session_data["quiz_type_pending"] = quiz_type # Remember which quiz to start
+    return (f"Of course! To find the perfect {quiz_type} routine for you, I just need to ask a few quick questions. "
+            "This helps me understand your specific needs so I can suggest a personalized routine. Shall we start?")
+
+def start_quiz(session_data: dict) -> str:
+    quiz_type = session_data.get("quiz_type_pending")
+    if not quiz_type: return "I'm not sure which quiz you wanted to start."
+    session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_quiz_start": False})
     try:
         with open(os.path.join(QUIZZES_DIR, f"{quiz_type}.json"), 'r') as f:
             quiz_data = json.load(f)
     except Exception:
         return "I'm sorry, my quiz materials are missing. I can still help with other questions!"
     session_data["current_quiz_session"] = {"quiz_data": quiz_data, "question_idx": 0, "quiz_type": quiz_type}
-    return (f"**✨ {quiz_type.capitalize()} Routine Quiz**\n"
-            f"I can definitely help! To personalize it, I'll ask a few quick questions.\n\n"
-            f"**Ready to start?** Type **'start'** to begin!")
+    return get_next_quiz_question(session_data)
 
 def get_next_quiz_question(session_data: dict) -> str:
+    # ... (No changes needed here)
     quiz_session = session_data["current_quiz_session"]
     idx = quiz_session["question_idx"]
     questions = quiz_session["quiz_data"]["questions"]
@@ -288,7 +289,9 @@ def get_next_quiz_question(session_data: dict) -> str:
     options_text = "\n".join([f"{i+1}. {opt['text']}" for i, opt in enumerate(q["options"])])
     return f"**Q{q['id']}**: {q['question']}\n{options_text}"
 
+
 def answer_quiz_option(session_data: dict, option_num: int) -> str:
+    # ... (No changes needed here)
     quiz_session = session_data["current_quiz_session"]
     q = quiz_session["quiz_data"]["questions"][quiz_session["question_idx"]]
     if 1 <= option_num <= len(q["options"]):
@@ -298,6 +301,7 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
 def finish_quiz(session_data: dict) -> str:
+    # ... (No changes needed here)
     result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
     quiz_type = session_data["current_quiz_session"]["quiz_type"]
     context = get_retriever().invoke(f"{result_type} {quiz_type} routine recommendation")
@@ -315,15 +319,16 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
     cleaned_q = _clean_text(raw_q)
-    print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
+    print(f"[DEBUG] User '{user_id}' asked: '{raw_q}' | Session state: {session_data.get('current_quiz_session')}, {session_data.get('waiting_for_workbook_confirmation')}, {session_data.get('waiting_for_quiz_start')}")
     answer = ""
     # --- Highest Priority: Handle ongoing stateful conversations ---
     if session_data.get("current_quiz_session"):
         if cleaned_q.isdigit(): answer = answer_quiz_option(session_data, int(cleaned_q))
-        elif cleaned_q in ["start", "yes", "begin"]: answer = get_next_quiz_question(session_data)
         else:
             session_data["current_quiz_session"] = None
             answer = "Quiz cancelled. How can I help with something else?"
+    elif session_data.get("waiting_for_quiz_start") and cleaned_q in (AFFIRMATIONS | {"start", "yes"}):
+        answer = start_quiz(session_data)
     elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in {"yes", "sure", "okay", "ok", "yep", "yeah"}:
         session_data['waiting_for_workbook_confirmation'] = False
         answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
@@ -331,7 +336,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     # --- Second Priority: Handle intents that change the state or are conversational ---
     if not answer:
         routine_type = detect_routine_intent(raw_q)
-        if routine_type: answer = start_quiz(session_data, routine_type)
+        if routine_type: answer = offer_quiz(session_data, routine_type)
         elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and not session_data.get('email'):
             session_data['email'] = raw_q
             answer = "🎉 **Thanks for signing up!** You'll hear from us soon. What can I help you next?"
@@ -341,22 +346,18 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             session_data.update({'waiting_for_workbook_confirmation': True, 'greeting_index': greeting_index + 1})
         elif cleaned_q in SMALL_TALK:
             answer = "I'm doing great, thanks for asking! Ready to help with your sustainability questions."
+        elif cleaned_q in AFFIRMATIONS:
+            answer = "Awesome! What can I help you with next? You can ask about brands, quizzes, or sustainable living tips!"
         elif re.search(r"\b(list|show)\s*brands?\b", cleaned_q):
             answer = respond_list_all_brands()
         elif re.match(r"^\s*rank\s+(.*)", cleaned_q):
             brand_name = re.match(r"^\s*rank\s+(.*)", cleaned_q).group(1).strip()
-            candidates = fuzzy_lookup_brand_candidates(brand_name, strict=True)
-            if len(candidates) == 1:
-                answer = get_brand_ranking_single(candidates[0])
-            elif len(candidates) > 1:
-                answer = "Did you mean one of these brands?\n- " + "\n- ".join(candidates)
-            else:
-                answer = get_brand_ranking_single(brand_name) # Attempt a direct match anyway
+            answer = get_brand_ranking_single(brand_name)
 
     # --- Fallback: General RAG for everything else ---
     if not answer:
-        session_data['waiting_for_workbook_confirmation'] = False
-        if len(cleaned_q.split()) <= 3:
+        session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False})
+        if len(cleaned_q.split()) <= 2:
             candidates = fuzzy_lookup_brand_candidates(raw_q)
             if candidates:
                 answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
