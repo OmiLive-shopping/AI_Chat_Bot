@@ -176,12 +176,12 @@ _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
 GREETINGS = ("hi", "hello", "hey")
 SMALL_TALK = ("how are you", "how are you doing")
-AFFIRMATIONS = ("sounds good", "awesome", "perfect", "great", "okay", "ok")
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok"}
 
 def get_llm() -> ChatVertexAI:
     global _llm
     if _llm: return _llm
-    _llm = ChatVertexAI(model_name="gemini-2.5-pro", temperature=0.5, max_output_tokens=1536)
+    _llm = ChatVertexAI(model_name="gemini-1.5-flash", temperature=0.5, max_output_tokens=1536)
     return _llm
 
 def get_retriever():
@@ -205,35 +205,33 @@ def preload_faiss_index():
     print("[INFO] FAISS index and brand data are ready.")
 
 # =========================
-# Brand Logic (Restored from previous version)
+# Brand Logic
 # =========================
-def load_brand_df() -> pd.DataFrame:
-    if not os.path.exists(BRAND_CSV):
-        print(f"[WARN] Brand CSV not found at {BRAND_CSV}. Brand features will be disabled.")
-        return pd.DataFrame()
+def get_brand_df() -> pd.DataFrame:
+    global _brand_df
+    if not _brand_df.empty: return _brand_df
+    if not os.path.exists(BRAND_CSV): return pd.DataFrame()
     try:
         df = pd.read_csv(BRAND_CSV)
+        original_brand_col = next((col for col in df.columns if 'brand' in col.lower() and 'name' in col.lower()), None)
+        if not original_brand_col: return pd.DataFrame()
+        
+        df = df.rename(columns={original_brand_col: "brand_name"})
+        
+        # Clean all column names *after* securing the brand_name column
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+        
+        # Handle the final_score column name
         possible_score_cols = [c for c in df.columns if "final" in c and "score" in c]
         if possible_score_cols:
             df = df.rename(columns={possible_score_cols[0]: "final_score"})
-        if "brand_name" not in df.columns:
-            for c in df.columns:
-                if "brand" in c and "name" in c:
-                    df = df.rename(columns={c: "brand_name"})
-                    break
-        df = df[df["brand_name"].astype(str).str.strip().ne("")]
-        df["brand_key"] = df["brand_name"].apply(_make_key)
-        return df
-    except Exception as e:
-        print(f"[ERROR] Failed to load brand metrics: {e}")
-        return pd.DataFrame()
 
-def get_brand_df() -> pd.DataFrame:
-    global _brand_df
-    if _brand_df.empty:
-        _brand_df = load_brand_df()
-    return _brand_df
+        df["brand_key"] = df["brand_name"].apply(_make_key)
+        _brand_df = df.dropna(subset=['brand_name'])
+        return _brand_df
+    except Exception as e:
+        print(f"[ERROR] Failed to load or process brand CSV: {e}")
+        return pd.DataFrame()
 
 def get_brand_ranking_single(brand_name: str) -> str:
     df = get_brand_df()
@@ -265,13 +263,12 @@ def respond_list_all_brands() -> str:
     brands = sorted(df["brand_name"].dropna().unique())
     return "📊 **Yes! I track these brands:**\n" + ", ".join(brands)
 
-def fuzzy_lookup_brand_candidates(user_text: str, strict: bool = False) -> List[str]:
+def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     df = get_brand_df()
-    if df.empty or "brand_key" not in df.columns: return []
+    if df.empty: return []
     key = _make_key(user_text)
     keys = df["brand_key"].tolist()
-    cutoff = 0.85 if strict else 0.6
-    matches = difflib.get_close_matches(key, keys, n=5, cutoff=cutoff)
+    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.6)
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
@@ -279,7 +276,7 @@ def fuzzy_lookup_brand_candidates(user_text: str, strict: bool = False) -> List[
 # =========================
 def offer_quiz(session_data: dict, quiz_type: str) -> str:
     session_data["waiting_for_quiz_start"] = True
-    session_data["quiz_type_pending"] = quiz_type # Remember which quiz to start
+    session_data["quiz_type_pending"] = quiz_type
     return (f"Of course! To find the perfect {quiz_type} routine for you, I just need to ask a few quick questions. "
             "This helps me understand your specific needs so I can suggest a personalized routine. Shall we start?")
 
@@ -303,7 +300,6 @@ def get_next_quiz_question(session_data: dict) -> str:
     q = questions[idx]
     options_text = "\n".join([f"{i+1}. {opt['text']}" for i, opt in enumerate(q["options"])])
     return f"**Q{q['id']}**: {q['question']}\n{options_text}"
-
 
 def answer_quiz_option(session_data: dict, option_num: int) -> str:
     quiz_session = session_data["current_quiz_session"]
@@ -334,6 +330,8 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     cleaned_q = _clean_text(raw_q)
     print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
     answer = ""
+    proactive_suggestion = ""
+    
     # --- Highest Priority: Handle ongoing stateful conversations ---
     if session_data.get("current_quiz_session"):
         if cleaned_q.isdigit(): answer = answer_quiz_option(session_data, int(cleaned_q))
@@ -361,29 +359,36 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             answer = "I'm doing great, thanks for asking! Ready to help with your sustainability questions."
         elif cleaned_q in AFFIRMATIONS:
             answer = "Awesome! What can I help you with next? You can ask about brands, quizzes, or sustainable living tips!"
+        elif re.search(r"\b(do you rank|ranking)\s*brands?\b", cleaned_q):
+            answer = "Yes, I can show you how brands score based on our data! I look at things like recycled materials and worker welfare. Would you like to see the full list of brands I track?"
+            session_data['waiting_for_brand_list'] = True # Proactive state
         elif re.search(r"\b(list|show)\s*brands?\b", cleaned_q):
             answer = respond_list_all_brands()
         elif re.match(r"^\s*rank\s+(.*)", cleaned_q):
             brand_name = re.match(r"^\s*rank\s+(.*)", cleaned_q).group(1).strip()
             answer = get_brand_ranking_single(brand_name)
-
+        
     # --- Fallback: General RAG for everything else ---
     if not answer:
-        session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False})
-        if len(cleaned_q.split()) <= 2:
+        session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False, 'waiting_for_brand_list': False})
+        # Handle single-word brand queries
+        if len(cleaned_q.split()) <= 3:
             candidates = fuzzy_lookup_brand_candidates(raw_q)
             if candidates:
-                answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-            else:
-                answer = "I'm not sure I understand. Could you please provide more details?"
-        else:
+                answer = get_brand_ranking_single(candidates[0])
+        
+        if not answer:
             context_docs = get_retriever().invoke(raw_q)
             context = "\n\n".join(d.page_content for d in context_docs)
             if not context: answer = get_llm().invoke(raw_q).content
             else:
                 prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
                 answer = get_llm().invoke(prompt).content
-    
+            
+            # Proactive suggestion after a general question
+            if session_data.get('response_count', 0) < 4:
+                proactive_suggestion = "\n\nBy the way, I can also rank brands on their sustainability. Just ask me to 'list brands'!"
+
     # --- Final Step: Append Newsletter Prompt ---
     if session_data.get('response_count', 0) == 2 and not session_data.get('email'):
         answer += "\n\nWe're totally vibing! 💫 **Want to join our newsletter?** Just drop your email to sign up! 🌱"
@@ -391,7 +396,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
 
     session_data['response_count'] += 1
     _session_manager.update_session(user_id, session_data)
-    return answer
+    return answer + proactive_suggestion
 
 # CLI test function
 if __name__ == "__main__":

@@ -2,19 +2,19 @@ from flask import Flask, request, jsonify, session, send_from_directory
 from flask_cors import CORS
 import traceback
 import os
-import csv
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import safe_join
+from datetime import datetime
 
 # Import from rag_chain
 try:
-    from rag_chain import get_rag_response, preload_faiss_index, WORKBOOK_PATH, get_user_id
+    from rag_chain import get_rag_response, preload_faiss_index, WORKBOOK_PATH, db # UPDATED: Import db
 except ImportError as e:
     print(f"[WARNING] Could not import rag_chain modules: {e}")
     get_rag_response = lambda *args: "Chat functionality is temporarily unavailable."
     preload_faiss_index = lambda: None
     WORKBOOK_PATH = None
-    get_user_id = lambda *args: "cli_user"
+    db = None
 
 # =========================
 # Flask App Setup
@@ -50,27 +50,36 @@ def health():
 
 @app.route("/register-email", methods=["POST"])
 def register_email():
+    """
+    UPDATED: This route now saves emails to Firestore for persistence.
+    """
     try:
+        if not db:
+            return jsonify({"status": "error", "message": "Database not configured"}), 500
+
         data = request.get_json()
         if not data:
             return jsonify({"status": "error", "message": "No data provided"}), 400
+        
         email = data.get("email", "").strip()
         if not email or "@" not in email:
             return jsonify({"status": "invalid", "message": "Invalid email format"}), 400
-        os.makedirs("data", exist_ok=True)
-        file_path = "data/user_emails.csv"
-        file_exists = os.path.isfile(file_path)
-        with open(file_path, "a", newline="") as f:
-            writer = csv.writer(f)
-            if not file_exists:
-                writer.writerow(["email", "timestamp"])
-            writer.writerow([email, os.environ.get("DEPLOYMENT_ID", "local")])
-        print(f"📩 New user email registered: {email}")
+        
+        # Save email to a 'registered_emails' collection in Firestore
+        email_ref = db.collection('registered_emails').document(email)
+        email_ref.set({
+            'email': email,
+            'timestamp': datetime.utcnow(),
+            'source': os.environ.get("DEPLOYMENT_ID", "local")
+        })
+
+        print(f"📩 New user email registered in Firestore: {email}")
         return jsonify({"status": "success", "message": "Email registered successfully"})
     except Exception as e:
-        print(f"[ERROR] Saving email: {e}")
+        print(f"[ERROR] Saving email to Firestore: {e}")
         traceback.print_exc()
         return jsonify({"status": "error", "message": "Internal server error"}), 500
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -83,7 +92,6 @@ def chat():
             return jsonify({"answer": "Empty message received"}), 400
         
         # All conversational logic is handled by get_rag_response
-        # Pass the Flask session object to the RAG chain
         answer = get_rag_response(user_input, session)
         
         return jsonify({"answer": answer})
@@ -133,10 +141,10 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[ERROR] ❌ Failed to preload FAISS index: {e}")
         traceback.print_exc()
-        # Exit with error code to prevent Gunicorn from running a broken app
         import sys
         sys.exit(1)
 
     port = int(os.environ.get("PORT", 8080))
     debug = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
     app.run(host="0.0.0.0", port=port, debug=debug)
+
