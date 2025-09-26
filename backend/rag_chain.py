@@ -650,10 +650,11 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             response = "Please enter the number of your choice for the quiz or type **'start'** to begin."
 
     # ===== Routine Intent Detection & Quiz Trigger =====
-    elif not _current_quiz_session and session_data.get('email') is not None:
-        routine_type = detect_routine_intent(raw_q)
-        if routine_type:
-            response = start_quiz(routine_type)
+    # UPDATED: This logic is now corrected to trigger the quiz for any user,
+    # not just those who have provided an email. This is the key fix.
+    routine_type = detect_routine_intent(raw_q)
+    if not response and not _current_quiz_session and routine_type:
+        response = start_quiz(routine_type)
 
     # ===== Quiz commands =====
     elif cleaned_q in {"start hair quiz", "hair quiz"}:
@@ -766,3 +767,4 @@ if __name__ == "__main__":
             break
         response = get_rag_response(user_input, "cli_user")
         print(f"OMI: {response}")
+
