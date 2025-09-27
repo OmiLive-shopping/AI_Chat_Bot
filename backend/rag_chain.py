@@ -182,7 +182,7 @@ AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes
 def get_llm() -> ChatVertexAI:
     global _llm
     if _llm: return _llm
-    _llm = ChatVertexAI(model_name="gemini-1.5-flash", temperature=0.5, max_output_tokens=1536)
+    _llm = ChatVertexAI(model_name="gemini-2.5-pro", temperature=0.5, max_output_tokens=1536)
     return _llm
 
 def get_retriever():
