@@ -206,7 +206,7 @@ def preload_faiss_index():
     print("[INFO] FAISS index and brand data are ready.")
 
 # =========================
-# Brand Logic
+# Brand Logic (Restored from preferred version)
 # =========================
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
@@ -214,21 +214,21 @@ def get_brand_df() -> pd.DataFrame:
     if not os.path.exists(BRAND_CSV): return pd.DataFrame()
     try:
         df = pd.read_csv(BRAND_CSV)
-        original_brand_col = next((col for col in df.columns if 'brand' in col.lower() and 'name' in col.lower()), None)
-        if not original_brand_col: return pd.DataFrame()
-        
-        df = df.rename(columns={original_brand_col: "brand_name"})
         df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-        
         possible_score_cols = [c for c in df.columns if "final" in c and "score" in c]
         if possible_score_cols:
             df = df.rename(columns={possible_score_cols[0]: "final_score"})
-
+        if "brand_name" not in df.columns:
+            for c in df.columns:
+                if "brand" in c and "name" in c:
+                    df = df.rename(columns={c: "brand_name"})
+                    break
+        df = df[df["brand_name"].astype(str).str.strip().ne("")]
         df["brand_key"] = df["brand_name"].apply(_make_key)
-        _brand_df = df.dropna(subset=['brand_name'])
-        return _brand_df
+        _brand_df = df
+        return df
     except Exception as e:
-        print(f"[ERROR] Failed to load or process brand CSV: {e}")
+        print(f"[ERROR] Failed to load brand metrics: {e}")
         return pd.DataFrame()
 
 def get_brand_ranking_single(brand_name: str) -> str:
@@ -270,7 +270,7 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
-# Quiz Logic
+# Quiz Logic (Restored from preferred version, adapted for sessions)
 # =========================
 def offer_quiz(session_data: dict, quiz_type: str) -> str:
     session_data["waiting_for_quiz_start"] = True
@@ -281,12 +281,14 @@ def offer_quiz(session_data: dict, quiz_type: str) -> str:
 def start_quiz(session_data: dict) -> str:
     quiz_type = session_data.get("quiz_type_pending")
     if not quiz_type: return "I'm not sure which quiz you wanted to start."
-    session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_quiz_start": False, "quiz_type_pending": None})
+    
+    session_data.update({"quiz_answers": [], "waiting_for_quiz_start": False, "quiz_type_pending": None})
     try:
         with open(os.path.join(QUIZZES_DIR, f"{quiz_type}.json"), 'r') as f:
             quiz_data = json.load(f)
     except Exception:
-        return "I'm sorry, my quiz materials are missing. I can still help with other questions!"
+        return "I'm sorry, my quiz materials are missing at the moment."
+    
     session_data["current_quiz_session"] = {"quiz_data": quiz_data, "question_idx": 0, "quiz_type": quiz_type}
     return get_next_quiz_question(session_data)
 
@@ -335,7 +337,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         if cleaned_q.isdigit(): answer = answer_quiz_option(session_data, int(cleaned_q))
         else:
             session_data["current_quiz_session"] = None
-            # Don't answer yet; let the new query be processed by the logic below
+            # Let the new query be processed by the logic below
     elif session_data.get("waiting_for_quiz_start") and cleaned_q in AFFIRMATIONS:
         answer = start_quiz(session_data)
     elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in AFFIRMATIONS:
@@ -371,13 +373,17 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     if not answer:
         session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False, 'waiting_for_brand_list': False})
         
-        if len(cleaned_q.split()) <= 3:
+        if len(cleaned_q.split()) <= 3: # Handle short/vague queries
             candidates = fuzzy_lookup_brand_candidates(raw_q)
             if len(candidates) == 1:
                 answer = get_brand_ranking_single(candidates[0])
             elif len(candidates) > 1:
                  answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-
+            elif cleaned_q in AFFIRMATIONS:
+                answer = "Great! What can I help you with?"
+            else:
+                 answer = "I'm not sure I understand. Could you please provide more details?"
+        
         if not answer:
             context_docs = get_retriever().invoke(raw_q)
             context = "\n\n".join(d.page_content for d in context_docs)
