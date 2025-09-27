@@ -1,4 +1,4 @@
-# rag_chain.py (Updated Full Version - Cloud Ready)
+# rag_chain.py (Full and Final Version - Cloud Ready)
 import os
 import re
 import difflib
@@ -72,7 +72,7 @@ SYSTEM_PERSONA = (
     "You are OMI — a warm, concise, upbeat sustainability guide for OMI Live. "
     "Tone: friendly, encouraging, and practical. Use plain language. "
     'Always answer directly and to-the-point first, then add 1–3 short bullets if helpful. '
-    "When you don't know, say \"I don't know.\" Never invent facts."
+    'When you don\'t know, say "I don\'t know." Never invent facts.'
 )
 
 # Varied greetings
@@ -141,7 +141,6 @@ class UserSessionManager:
 
 _session_manager = UserSessionManager(db)
 
-
 def get_user_id(session: Any) -> str:
     if isinstance(session, dict):
         if "user_id" not in session:
@@ -162,10 +161,8 @@ def detect_routine_intent(question: str) -> Optional[str]:
     if has_hair and not has_skin: return 'hair'
     return None
 
-
 def _clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", str(text).lower()).strip()
-
 
 def _make_key(text: str) -> str:
     s = str(text).lower()
@@ -174,53 +171,19 @@ def _make_key(text: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-# Helper for robust affirmative detection
-AFFIRMATIONS = {
-    "yes", "y", "yep", "yeah", "sure", "ok", "okay", "please", "yes please", "sounds good",
-    "lets do it", "let's do it", "start", "start quiz", "go", "go ahead", "affirmative"
-}
-
-NEGATIONS = {"no", "nope", "not now", "later", "nah"}
-
-
-def is_affirmative(text: str) -> bool:
-    if not text: return False
-    t = _clean_text(text)
-    # direct match
-    if t in AFFIRMATIONS: return True
-    # token-based match: any single token equals an affirmation
-    for tok in t.split():
-        if tok in AFFIRMATIONS:
-            return True
-    # common short forms
-    if re.match(r"^y+($|\s)", t):
-        return True
-    return False
-
-
-def is_negative(text: str) -> bool:
-    if not text: return False
-    t = _clean_text(text)
-    if t in NEGATIONS: return True
-    for tok in t.split():
-        if tok in NEGATIONS:
-            return True
-    return False
-
 # Globals for stateless, expensive-to-create objects
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
 GREETINGS = ("hi", "hello", "hey")
 SMALL_TALK = ("how are you", "how are you doing")
-
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz"}
 
 def get_llm() -> ChatVertexAI:
     global _llm
     if _llm: return _llm
-    _llm = ChatVertexAI(model_name="gemini-2.5-pro", temperature=0.5, max_output_tokens=1536)
+    _llm = ChatVertexAI(model_name="gemini-1.5-flash", temperature=0.5, max_output_tokens=1536)
     return _llm
-
 
 def get_retriever():
     global _retriever
@@ -228,29 +191,19 @@ def get_retriever():
     embeddings = VertexAIEmbeddings(model_name="text-embedding-004")
     try:
         vect = FAISS.load_local(VECTORSTORE_DIR, embeddings, allow_dangerous_deserialization=True)
-    except Exception:
-        docs = []
-        if os.path.exists(FAQ_PATH):
-            docs += TextLoader(FAQ_PATH).load()
-        if os.path.exists(KB_PATH):
-            docs += TextLoader(KB_PATH).load()
-        if not docs:
-            raise RuntimeError("No documents found to build FAISS index.")
+    except:
+        docs = TextLoader(FAQ_PATH).load() + TextLoader(KB_PATH).load()
         chunks = RecursiveCharacterTextSplitter(chunk_size=600, chunk_overlap=80).split_documents(docs)
         vect = FAISS.from_documents(chunks, embeddings)
         vect.save_local(VECTORSTORE_DIR)
     _retriever = vect.as_retriever(search_kwargs={"k": 5})
     return _retriever
 
-
 def preload_faiss_index():
     print("[INFO] Preloading FAISS index...")
-    try:
-        get_retriever()
-        get_brand_df() # Also preload brand data
-        print("[INFO] FAISS index and brand data are ready.")
-    except Exception as e:
-        print(f"[WARN] Preload failed: {e}")
+    get_retriever()
+    get_brand_df() # Also preload brand data
+    print("[INFO] FAISS index and brand data are ready.")
 
 # =========================
 # Brand Logic
@@ -278,7 +231,6 @@ def get_brand_df() -> pd.DataFrame:
         print(f"[ERROR] Failed to load or process brand CSV: {e}")
         return pd.DataFrame()
 
-
 def get_brand_ranking_single(brand_name: str) -> str:
     df = get_brand_df()
     if df.empty: return "I don't have brand ranking information available right now."
@@ -303,13 +255,11 @@ def get_brand_ranking_single(brand_name: str) -> str:
         response += "\n\n" + "\n".join(breakdown)
     return response
 
-
 def respond_list_all_brands() -> str:
     df = get_brand_df()
     if df.empty: return "I don't have brand information right now."
     brands = sorted(df["brand_name"].dropna().unique())
     return "📊 **Yes! I track these brands:**\n" + ", ".join(brands)
-
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     df = get_brand_df()
@@ -328,11 +278,10 @@ def offer_quiz(session_data: dict, quiz_type: str) -> str:
     return (f"Of course! To find the perfect {quiz_type} routine for you, I just need to ask a few quick questions. "
             "This helps me understand your specific needs so I can suggest a personalized routine. Shall we start?")
 
-
 def start_quiz(session_data: dict) -> str:
     quiz_type = session_data.get("quiz_type_pending")
     if not quiz_type: return "I'm not sure which quiz you wanted to start."
-    session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_quiz_start": False})
+    session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_quiz_start": False, "quiz_type_pending": None})
     try:
         with open(os.path.join(QUIZZES_DIR, f"{quiz_type}.json"), 'r') as f:
             quiz_data = json.load(f)
@@ -340,7 +289,6 @@ def start_quiz(session_data: dict) -> str:
         return "I'm sorry, my quiz materials are missing. I can still help with other questions!"
     session_data["current_quiz_session"] = {"quiz_data": quiz_data, "question_idx": 0, "quiz_type": quiz_type}
     return get_next_quiz_question(session_data)
-
 
 def get_next_quiz_question(session_data: dict) -> str:
     quiz_session = session_data["current_quiz_session"]
@@ -351,7 +299,6 @@ def get_next_quiz_question(session_data: dict) -> str:
     options_text = "\n".join([f"{i+1}. {opt['text']}" for i, opt in enumerate(q["options"])])
     return f"**Q{q['id']}**: {q['question']}\n{options_text}"
 
-
 def answer_quiz_option(session_data: dict, option_num: int) -> str:
     quiz_session = session_data["current_quiz_session"]
     q = quiz_session["quiz_data"]["questions"][quiz_session["question_idx"]]
@@ -361,26 +308,17 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
         return get_next_quiz_question(session_data)
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
-
 def finish_quiz(session_data: dict) -> str:
-    if not session_data.get("quiz_answers"):
-        session_data.update({"current_quiz_session": None, "waiting_for_workbook_confirmation": False})
-        return "You didn't answer any quiz questions. We can try again later."
     result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
     quiz_type = session_data["current_quiz_session"]["quiz_type"]
-    # Use retriever to fetch helpful context snippets if available
-    try:
-        context_docs = get_retriever().get_relevant_documents(f"{result_type} {quiz_type} routine recommendation")
-        context = "\n\n".join(d.page_content for d in context_docs)
-    except Exception:
-        context = ""
-    prompt = f"You are OMI. Based on this context, recommend a routine for {quiz_type} type: {result_type}.\n\nContext: {context}"
+    context = get_retriever().invoke(f"{result_type} {quiz_type} routine recommendation")
+    prompt = f"You are OMI. Based on this context, recommend a routine for {quiz_type} type: {result_type}.\n\nContext: {''.join(d.page_content for d in context)}"
     recommendation = get_llm().invoke(prompt).content
     session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_workbook_confirmation": True})
     return f"**Your {quiz_type} type:** *{result_type}*\n\n{recommendation}\n\n📘 Want me to send the *Omi Live Tactical Workbook*?"
 
 # =========================
-# Main Response Generator
+# Main Response Generator (Rewritten Logic)
 # =========================
 def get_rag_response(question: str, chat_session: Any) -> str:
     user_id = get_user_id(chat_session)
@@ -394,34 +332,23 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     
     # --- Highest Priority: Handle ongoing stateful conversations ---
     if session_data.get("current_quiz_session"):
-        # if we're inside an active quiz session, accept numeric answers
-        if cleaned_q.isdigit():
-            try:
-                answer = answer_quiz_option(session_data, int(cleaned_q))
-            except Exception:
-                answer = "Invalid input. Please reply with the option number."
+        if cleaned_q.isdigit(): answer = answer_quiz_option(session_data, int(cleaned_q))
         else:
-            # allow explicit cancellation words
-            if is_negative(cleaned_q) or cleaned_q in {"cancel", "stop", "exit"}:
-                session_data["current_quiz_session"] = None
-                answer = "Quiz cancelled. How can I help with something else?"
-            else:
-                answer = "Please answer using the option number (e.g., 1) or say 'cancel' to stop the quiz."
-    # Offer to start quiz when user affirms
-    elif session_data.get("waiting_for_quiz_start") and is_affirmative(raw_q):
+            session_data["current_quiz_session"] = None
+            # Don't answer yet; let the new query be processed by the logic below
+    elif session_data.get("waiting_for_quiz_start") and cleaned_q in AFFIRMATIONS:
         answer = start_quiz(session_data)
-    elif session_data.get("waiting_for_workbook_confirmation") and is_affirmative(raw_q):
+    elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in AFFIRMATIONS:
         session_data['waiting_for_workbook_confirmation'] = False
         answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
-    elif session_data.get("waiting_for_brand_list") and is_affirmative(raw_q):
+    elif session_data.get("waiting_for_brand_list") and cleaned_q in AFFIRMATIONS:
         session_data['waiting_for_brand_list'] = False
         answer = respond_list_all_brands()
 
     # --- Second Priority: Handle intents that change the state or are conversational ---
     if not answer:
         routine_type = detect_routine_intent(raw_q)
-        if routine_type:
-            answer = offer_quiz(session_data, routine_type)
+        if routine_type: answer = offer_quiz(session_data, routine_type)
         elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and not session_data.get('email'):
             session_data['email'] = raw_q
             answer = "🎉 **Thanks for signing up!** You'll hear from us soon. What can I help you next?"
@@ -429,7 +356,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             greeting_index = session_data.get('greeting_index', 0)
             answer = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
             session_data.update({'waiting_for_workbook_confirmation': True, 'greeting_index': greeting_index + 1})
-        elif any(cleaned_q.startswith(s) for s in SMALL_TALK):
+        elif cleaned_q in SMALL_TALK:
             answer = "I'm doing great, thanks for asking! Ready to help with your sustainability questions."
         elif re.search(r"\b(do you rank|ranking)\s*brands?\b", cleaned_q):
             answer = "Yes, I can show you how brands score based on our data! I look at things like recycled materials and worker welfare. Would you like to see the full list of brands I track?"
@@ -442,10 +369,8 @@ def get_rag_response(question: str, chat_session: Any) -> str:
 
     # --- Fallback: General RAG for everything else ---
     if not answer:
-        # Reset state flags if user changes the topic
         session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False, 'waiting_for_brand_list': False})
         
-        # Handle single-word brand queries better
         if len(cleaned_q.split()) <= 3:
             candidates = fuzzy_lookup_brand_candidates(raw_q)
             if len(candidates) == 1:
@@ -454,40 +379,28 @@ def get_rag_response(question: str, chat_session: Any) -> str:
                  answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
         if not answer:
-            try:
-                context_docs = get_retriever().get_relevant_documents(raw_q)
-            except Exception:
-                context_docs = []
-
-            context = "\n\n".join(d.page_content for d in context_docs) if context_docs else ""
-            if not context:
-                # If no retriever context, fallback to a direct LLM reply but encourage concise answers
-                prompt = f"{SYSTEM_PERSONA}\n\nQuestion: {raw_q}\nDirect answer:" 
-                answer = get_llm().invoke(prompt).content
+            context_docs = get_retriever().invoke(raw_q)
+            context = "\n\n".join(d.page_content for d in context_docs)
+            if not context: answer = get_llm().invoke(raw_q).content
             else:
                 prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
                 answer = get_llm().invoke(prompt).content
             
-            # Add a proactive suggestion ONLY after a general RAG answer
-            if session_data.get('response_count', 0) and session_data.get('response_count', 0) % 4 == 0:
-                proactive_suggestion = "\n\nBy the way, I can also create a personalized hair or skin care routine for you. Just ask!"
+            if 'founder' in cleaned_q or 'omi live' in cleaned_q:
+                proactive_suggestion = "\n\nI can also rank brands on their sustainability scores or help you with a personalized skin care quiz. What are you curious about?"
 
     # --- Final Step: Append Newsletter Prompt ---
     if session_data.get('response_count', 0) == 2 and not session_data.get('email'):
         answer += "\n\nWe're totally vibing! 💫 **Want to join our newsletter?** Just drop your email to sign up! 🌱"
         session_data['last_prompted_at'] = datetime.now().isoformat()
 
-    # increment and persist session
-    session_data['response_count'] = session_data.get('response_count', 0) + 1
+    session_data['response_count'] += 1
     _session_manager.update_session(user_id, session_data)
-    return (answer or "I don't know.") + proactive_suggestion
+    return answer + proactive_suggestion
 
 # CLI test function
 if __name__ == "__main__":
-    try:
-        preload_faiss_index()
-    except Exception:
-        print("[WARN] Could not preload FAISS index — continuing without it.")
+    preload_faiss_index()
     print("🤖 OMI Bot is ready!")
     cli_session = {"user_id": "cli_user"}
     while True:
@@ -495,3 +408,4 @@ if __name__ == "__main__":
         if user_input.lower() in ['quit', 'exit']: break
         response = get_rag_response(user_input, cli_session)
         print(f"OMI: {response}")
+
