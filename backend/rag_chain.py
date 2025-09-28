@@ -136,6 +136,7 @@ class UserSessionManager:
             "waiting_for_workbook_confirmation": False, "current_quiz_session": None,
             "quiz_answers": [], "waiting_for_quiz_start": False,
             "waiting_for_brand_list": False,
+            "waiting_for_rank_confirmation": False, "brand_to_rank": None,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -159,6 +160,9 @@ def detect_routine_intent(question: str) -> Optional[str]:
     has_skin = any(word in cleaned_q for word in skin_keywords)
     if has_skin and not has_hair: return 'skin'
     if has_hair and not has_skin: return 'hair'
+    # Handle cases like "skin quiz" or "hair quiz" explicitly
+    if 'skin' in cleaned_q and 'quiz' in cleaned_q: return 'skin'
+    if 'hair' in cleaned_q and 'quiz' in cleaned_q: return 'hair'
     return None
 
 def _clean_text(text: str) -> str:
@@ -177,7 +181,7 @@ _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
 GREETINGS = ("hi", "hello", "hey")
 SMALL_TALK = ("how are you", "how are you doing")
-AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz"}
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start"}
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -206,7 +210,7 @@ def preload_faiss_index():
     print("[INFO] FAISS index and brand data are ready.")
 
 # =========================
-# Brand Logic (Restored from preferred version)
+# Brand Logic
 # =========================
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
@@ -223,6 +227,7 @@ def get_brand_df() -> pd.DataFrame:
                 if "brand" in c and "name" in c:
                     df = df.rename(columns={c: "brand_name"})
                     break
+        df = df.dropna(subset=['brand_name'])
         df = df[df["brand_name"].astype(str).str.strip().ne("")]
         df["brand_key"] = df["brand_name"].apply(_make_key)
         _brand_df = df
@@ -265,12 +270,20 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     df = get_brand_df()
     if df.empty: return []
     key = _make_key(user_text)
+    if not key: return []
     keys = df["brand_key"].tolist()
     matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.7)
-    return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
+    # A second pass for partial matches like 'zerra' in 'zerra and co'
+    if not matches:
+        for b_key, b_name in zip(df["brand_key"], df["brand_name"]):
+            if key in b_key.split():
+                matches.append(b_key)
+                if len(matches) >= 3: break
     
+    return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
+
 # =========================
-# Quiz Logic (Restored from preferred version, adapted for sessions)
+# Quiz Logic
 # =========================
 def offer_quiz(session_data: dict, quiz_type: str) -> str:
     session_data["waiting_for_quiz_start"] = True
@@ -320,7 +333,7 @@ def finish_quiz(session_data: dict) -> str:
     return f"**Your {quiz_type} type:** *{result_type}*\n\n{recommendation}\n\n📘 Want me to send the *Omi Live Tactical Workbook*?"
 
 # =========================
-# Main Response Generator (Corrected Logic)
+# Main Response Generator
 # =========================
 def get_rag_response(question: str, chat_session: Any) -> str:
     user_id = get_user_id(chat_session)
@@ -330,49 +343,50 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     cleaned_q = _clean_text(raw_q)
     print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
     
-    # --- Step 1: Handle ongoing, stateful interactions FIRST ---
-    # This block handles replies to questions the bot has just asked.
+    is_affirmative = any(cleaned_q.startswith(a) for a in AFFIRMATIONS)
     
-    # Is the user currently answering quiz questions?
+    # --- Step 1: Handle ongoing, stateful interactions FIRST ---
     if session_data.get("current_quiz_session"):
         if cleaned_q.isdigit():
             answer = answer_quiz_option(session_data, int(cleaned_q))
-        else: # User typed text, breaking the quiz flow. Reset and re-evaluate their new query.
+        else:
             session_data["current_quiz_session"] = None
-            # We will now fall through to let the new query be processed below.
-        
-        # If the quiz is still active after the answer, return the next question and stop.
         if session_data.get("current_quiz_session") is not None:
             _session_manager.update_session(user_id, session_data)
             return answer
 
-    # Is the user saying "yes" to starting a quiz?
-    if session_data.get("waiting_for_quiz_start") and cleaned_q in AFFIRMATIONS:
+    if session_data.get("waiting_for_quiz_start") and is_affirmative:
         answer = start_quiz(session_data)
         _session_manager.update_session(user_id, session_data)
         return answer
         
-    # Is the user saying "yes" to the brand list offer?
-    if session_data.get("waiting_for_brand_list") and cleaned_q in AFFIRMATIONS:
-        session_data['waiting_for_brand_list'] = False # Clear this specific state
+    if session_data.get("waiting_for_rank_confirmation") and is_affirmative:
+        brand_to_rank = session_data.get("brand_to_rank")
+        session_data["waiting_for_rank_confirmation"] = False
+        session_data["brand_to_rank"] = None
+        if brand_to_rank:
+            answer = get_brand_ranking_single(brand_to_rank)
+            _session_manager.update_session(user_id, session_data)
+            return answer
+
+    if session_data.get("waiting_for_brand_list") and is_affirmative:
+        session_data['waiting_for_brand_list'] = False
         answer = respond_list_all_brands()
         _session_manager.update_session(user_id, session_data)
         return answer
 
-    # Is the user saying "yes" to the workbook offer?
-    if session_data.get("waiting_for_workbook_confirmation") and cleaned_q in AFFIRMATIONS:
-        session_data['waiting_for_workbook_confirmation'] = False # Clear this specific state
+    if session_data.get("waiting_for_workbook_confirmation") and is_affirmative:
+        session_data['waiting_for_workbook_confirmation'] = False
         answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
         _session_manager.update_session(user_id, session_data)
         return answer
 
-    # --- Step 2: If no stateful action was taken, clear old "waiting" flags and detect new intents ---
-    # If we've reached this point, it means the user's input is a NEW topic, not a reply to a pending question.
-    # So, we can safely clear any old "waiting" flags.
+    # --- Step 2: Clear old "waiting" flags and detect new intents ---
     session_data.update({
-        'waiting_for_quiz_start': False, 
+        'waiting_for_quiz_start': False, 'quiz_type_pending': None,
         'waiting_for_brand_list': False,
-        'waiting_for_workbook_confirmation': False
+        'waiting_for_workbook_confirmation': False,
+        'waiting_for_rank_confirmation': False, 'brand_to_rank': None
     })
     
     answer = ""
@@ -401,22 +415,24 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         intro = "Yes, we do! We score brands to help you see how they stack up.\n\n" \
                 "* Each brand gets a Final Score out of 30.\n" \
                 "* The score is based on categories like using recycled materials, worker welfare, and local sourcing."
-        
-        # Get the brand list string, but remove the conversational part
         brand_list_text = respond_list_all_brands().replace("📊 **Yes! I track these brands:**\n", "")
-        
         answer = f"{intro}\n\nHere are the brands I track:\n{brand_list_text}"
-
-        # No longer need to wait for a response, so we don't set a flag
         _session_manager.update_session(user_id, session_data)
         return answer
         
     if re.search(r"\b(list|show)\s*brands?\b", cleaned_q):
         return respond_list_all_brands()
         
-    if re.match(r"^\s*rank\s+(.*)", cleaned_q):
-        brand_name = re.match(r"^\s*rank\s+(.*)", cleaned_q).group(1).strip()
-        return get_brand_ranking_single(brand_name)
+    rank_match = re.match(r"^\s*rank\s+(.*)", cleaned_q)
+    if rank_match:
+        brand_name_query = rank_match.group(1).strip()
+        candidates = fuzzy_lookup_brand_candidates(brand_name_query)
+        if len(candidates) == 1:
+            return get_brand_ranking_single(candidates[0])
+        elif len(candidates) > 1:
+            return f"I found a few brands that match '{brand_name_query}'. Which one did you mean?\n- " + "\n- ".join(candidates)
+        else:
+            return f"I couldn't find a brand ranking for '{brand_name_query}'."
         
     # Intent: Email signup
     if re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and not session_data.get('email'):
@@ -426,16 +442,18 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         return answer
 
     # --- Step 3: Fallback to General RAG for everything else ---
-    
-    # Handle short/vague queries that might be brand names
-    if len(cleaned_q.split()) <= 3:
+    if len(cleaned_q.split()) <= 4:
         candidates = fuzzy_lookup_brand_candidates(raw_q)
         if len(candidates) == 1:
-            return get_brand_ranking_single(candidates[0])
+            brand_name = candidates[0]
+            session_data["waiting_for_rank_confirmation"] = True
+            session_data["brand_to_rank"] = brand_name
+            answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
+            _session_manager.update_session(user_id, session_data)
+            return answer
         elif len(candidates) > 1:
             return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
-    # Perform RAG
     context_docs = get_retriever().invoke(raw_q)
     context = "\n\n".join(d.page_content for d in context_docs)
     
