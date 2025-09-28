@@ -8,7 +8,7 @@ from datetime import datetime
 
 # Import from rag_chain
 try:
-    from rag_chain import get_rag_response, preload_faiss_index, WORKBOOK_PATH, db # UPDATED: Import db
+    from rag_chain import get_rag_response, preload_faiss_index, WORKBOOK_PATH, db
 except ImportError as e:
     print(f"[WARNING] Could not import rag_chain modules: {e}")
     get_rag_response = lambda *args: "Chat functionality is temporarily unavailable."
@@ -41,7 +41,6 @@ app.config.update(
 # =========================
 @app.route("/")
 def index():
-    session.pop("history", None)
     return jsonify({"status": "API is running", "version": "1.0"})
 
 @app.route("/health")
@@ -50,9 +49,6 @@ def health():
 
 @app.route("/register-email", methods=["POST"])
 def register_email():
-    """
-    UPDATED: This route now saves emails to Firestore for persistence.
-    """
     try:
         if not db:
             return jsonify({"status": "error", "message": "Database not configured"}), 500
@@ -65,7 +61,6 @@ def register_email():
         if not email or "@" not in email:
             return jsonify({"status": "invalid", "message": "Invalid email format"}), 400
         
-        # Save email to a 'registered_emails' collection in Firestore
         email_ref = db.collection('registered_emails').document(email)
         email_ref.set({
             'email': email,
@@ -91,8 +86,15 @@ def chat():
         if not user_input:
             return jsonify({"answer": "Empty message received"}), 400
         
-        # All conversational logic is handled by get_rag_response
-        answer = get_rag_response(user_input, session)
+        # --- THIS IS THE FIX ---
+        # 1. Check if a user_id exists in the session.
+        if 'user_id' not in session:
+            # 2. If not, create a new one and save it. This happens only once per user.
+            session['user_id'] = os.urandom(16).hex()
+            print(f"[INFO] New session created with user_id: {session['user_id']}")
+
+        # 3. Pass the persistent user_id (now a simple string) to the RAG chain.
+        answer = get_rag_response(user_input, session['user_id'])
         
         return jsonify({"answer": answer})
     except Exception as e:
@@ -132,19 +134,25 @@ def internal_error(error):
 # =========================
 # Run App
 # =========================
-if __name__ == "__main__":
-    # Preload the FAISS index on application startup
-    print("[INFO] Preloading FAISS index...")
+if __name__ != "__main__":
+    # Preload when running with Gunicorn in Cloud Run
+    print("[INFO] Preloading FAISS index for Gunicorn...")
     try:
         preload_faiss_index()
         print("[INFO] ✅ FAISS index ready.")
     except Exception as e:
         print(f"[ERROR] ❌ Failed to preload FAISS index: {e}")
         traceback.print_exc()
-        import sys
-        sys.exit(1)
+
+if __name__ == "__main__":
+    # Preload for local development
+    print("[INFO] Preloading FAISS index for local development...")
+    try:
+        preload_faiss_index()
+        print("[INFO] ✅ FAISS index ready.")
+    except Exception as e:
+        print(f"[ERROR] ❌ Failed to preload FAISS index: {e}")
 
     port = int(os.environ.get("PORT", 8080))
     debug = os.environ.get("FLASK_DEBUG", "False").lower() == "true"
     app.run(host="0.0.0.0", port=port, debug=debug)
-

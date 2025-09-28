@@ -142,12 +142,21 @@ class UserSessionManager:
 
 _session_manager = UserSessionManager(db)
 
-def get_user_id(session: Any) -> str:
-    if isinstance(session, dict):
-        if "user_id" not in session:
-            session["user_id"] = os.urandom(16).hex()
-        return session["user_id"]
-    return str(session) if session else os.urandom(16).hex()
+# --- THIS FUNCTION IS UPDATED ---
+def get_user_id(session_info: Any) -> str:
+    # Handles the string user_id passed from the updated app.py
+    if isinstance(session_info, str):
+        return session_info
+    
+    # Fallback for CLI testing, which might pass a dict
+    if isinstance(session_info, dict):
+        if "user_id" not in session_info:
+            session_info["user_id"] = os.urandom(16).hex()
+        return session_info["user_id"]
+    
+    # A safe default if the input is unexpected
+    return os.urandom(16).hex()
+
 
 # =========================
 # Core Bot Logic (Stateless Helpers)
@@ -159,7 +168,8 @@ AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes
 
 def is_affirmative_response(text: str) -> bool:
     cleaned = _clean_text(text)
-    return any(cleaned.startswith(a) for a in AFFIRMATIONS)
+    # Check if the cleaned text exactly matches or starts with any affirmation
+    return any(cleaned == a or cleaned.startswith(a + " ") for a in AFFIRMATIONS)
 
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
@@ -332,8 +342,7 @@ def finish_quiz(session_data: dict) -> str:
 # =========================
 # Main Response Generator
 # =========================
-def get_rag_response(question: str, chat_session: Any) -> str:
-    user_id = get_user_id(chat_session)
+def get_rag_response(question: str, user_id: str) -> str:
     session_data = _session_manager.get_session(user_id)
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
@@ -342,38 +351,27 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     print(f"[DEBUG] Session state at start: {session_data}")
     
     # --- BLOCK A: Handle responses to the bot's direct questions ---
-    # This block checks if the user is replying to a question we just asked.
-    # If it handles the query, it returns immediately.
-    
     is_affirmative = is_affirmative_response(raw_q)
     print(f"[DEBUG] Query: '{_clean_text(raw_q)}', Is Affirmative: {is_affirmative}")
 
-    # Is user answering a quiz question?
     if session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
             answer = answer_quiz_option(session_data, int(_clean_text(raw_q)))
         else:
-            session_data["current_quiz_session"] = None # Non-digit breaks quiz
+            session_data["current_quiz_session"] = None
         if session_data.get("current_quiz_session") is not None:
             _session_manager.update_session(user_id, session_data)
             return answer
 
-    # Is user confirming they want to start a quiz?
     if session_data.get("waiting_for_quiz_start"):
-        print("[DEBUG] State: waiting_for_quiz_start")
         if is_affirmative:
-            print("[DEBUG] Affirmation detected for quiz start.")
             answer = start_quiz(session_data)
             _session_manager.update_session(user_id, session_data)
             return answer
         
-    # Is user confirming they want a brand ranked?
     if session_data.get("waiting_for_rank_confirmation"):
-        print("[DEBUG] State: waiting_for_rank_confirmation")
         if is_affirmative:
-            print("[DEBUG] Affirmation detected for rank confirmation.")
             brand_to_rank = session_data.get("brand_to_rank")
-            # Clear state immediately
             session_data["waiting_for_rank_confirmation"] = False
             session_data["brand_to_rank"] = None
             _session_manager.update_session(user_id, session_data)
@@ -383,22 +381,17 @@ def get_rag_response(question: str, chat_session: Any) -> str:
                 return "I'm sorry, I seem to have forgotten which brand you asked about. Could you please tell me again?"
 
     # --- BLOCK B: Handle a new query from the user ---
-    # If we reached here, it means the user is not replying to a direct question.
-    # We can safely clear old "waiting" flags and look for a new intent.
-    
     session_data.update({
         'waiting_for_quiz_start': False, 'quiz_type_pending': None,
         'waiting_for_rank_confirmation': False, 'brand_to_rank': None
     })
     
-    # Intent: Start a routine/quiz
     routine_type = detect_routine_intent(raw_q)
     if routine_type:
         answer = offer_quiz(session_data, routine_type)
         _session_manager.update_session(user_id, session_data)
         return answer
         
-    # Intent: Brand questions (explicit "rank" command)
     rank_match = re.match(r"^\s*rank\s+(.*)", _clean_text(raw_q))
     if rank_match:
         brand_name_query = rank_match.group(1).strip()
@@ -410,7 +403,6 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         else:
             return f"I couldn't find a brand ranking for '{brand_name_query}'."
 
-    # Intent: Brand questions (short query, implicit rank)
     if len(raw_q.split()) <= 4:
         candidates = fuzzy_lookup_brand_candidates(raw_q)
         if len(candidates) == 1:
@@ -423,7 +415,6 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         elif len(candidates) > 1:
             return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
-    # Fallback to general RAG
     context_docs = get_retriever().invoke(raw_q)
     context = "\n\n".join(d.page_content for d in context_docs)
     
@@ -443,5 +434,5 @@ if __name__ == "__main__":
     while True:
         user_input = input("\nYou: ").strip()
         if user_input.lower() in ['quit', 'exit']: break
-        response = get_rag_response(user_input, cli_session)
+        response = get_rag_response(user_input, cli_session['user_id'])
         print(f"OMI: {response}")
