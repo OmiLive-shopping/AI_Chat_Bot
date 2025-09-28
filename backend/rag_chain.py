@@ -182,7 +182,7 @@ _brand_df: pd.DataFrame = pd.DataFrame()
 def get_llm() -> ChatVertexAI:
     global _llm
     if _llm: return _llm
-    _llm = ChatVertexAI(model_name="gemini-1.5-pro-001", temperature=0.5, max_output_tokens=1536)
+    _llm = ChatVertexAI(model_name="gemini-2.5-pro", temperature=0.5, max_output_tokens=1536)
     return _llm
 
 def get_retriever():
