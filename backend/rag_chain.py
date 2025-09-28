@@ -398,8 +398,16 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         
     # Intent: Brand questions
     if re.search(r"\b(do you rank|ranking)\s*brands?\b", cleaned_q):
-        answer = "Yes, I can show you how brands score based on our data! I look at things like recycled materials and worker welfare. Would you like to see the full list of brands I track?"
-        session_data['waiting_for_brand_list'] = True
+        intro = "Yes, we do! We score brands to help you see how they stack up.\n\n" \
+                "* Each brand gets a Final Score out of 30.\n" \
+                "* The score is based on categories like using recycled materials, worker welfare, and local sourcing."
+        
+        # Get the brand list string, but remove the conversational part
+        brand_list_text = respond_list_all_brands().replace("📊 **Yes! I track these brands:**\n", "")
+        
+        answer = f"{intro}\n\nHere are the brands I track:\n{brand_list_text}"
+
+        # No longer need to wait for a response, so we don't set a flag
         _session_manager.update_session(user_id, session_data)
         return answer
         
@@ -426,8 +434,6 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             return get_brand_ranking_single(candidates[0])
         elif len(candidates) > 1:
             return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-        elif cleaned_q in AFFIRMATIONS:
-            return "Great! What can I help you with?"
 
     # Perform RAG
     context_docs = get_retriever().invoke(raw_q)
