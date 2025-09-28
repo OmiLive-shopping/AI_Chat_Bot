@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 # LangChain / embeddings / vectorstore
 from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import RecursiveCharacterText_splitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 
