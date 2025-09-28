@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 # LangChain / embeddings / vectorstore
 from langchain_community.document_loaders import TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterText_splitter
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 
@@ -320,7 +320,7 @@ def finish_quiz(session_data: dict) -> str:
     return f"**Your {quiz_type} type:** *{result_type}*\n\n{recommendation}\n\n📘 Want me to send the *Omi Live Tactical Workbook*?"
 
 # =========================
-# Main Response Generator (Rewritten Logic)
+# Main Response Generator (Corrected Logic)
 # =========================
 def get_rag_response(question: str, chat_session: Any) -> str:
     user_id = get_user_id(chat_session)
@@ -329,79 +329,127 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     if not raw_q: return "I don't know."
     cleaned_q = _clean_text(raw_q)
     print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
+    
+    # --- Step 1: Handle ongoing, stateful interactions FIRST ---
+    # This block handles replies to questions the bot has just asked.
+    
+    # Is the user currently answering quiz questions?
+    if session_data.get("current_quiz_session"):
+        if cleaned_q.isdigit():
+            answer = answer_quiz_option(session_data, int(cleaned_q))
+        else: # User typed text, breaking the quiz flow. Reset and re-evaluate their new query.
+            session_data["current_quiz_session"] = None
+            # We will now fall through to let the new query be processed below.
+        
+        # If the quiz is still active after the answer, return the next question and stop.
+        if session_data.get("current_quiz_session") is not None:
+            _session_manager.update_session(user_id, session_data)
+            return answer
+
+    # Is the user saying "yes" to starting a quiz?
+    if session_data.get("waiting_for_quiz_start") and cleaned_q in AFFIRMATIONS:
+        answer = start_quiz(session_data)
+        _session_manager.update_session(user_id, session_data)
+        return answer
+        
+    # Is the user saying "yes" to the brand list offer?
+    if session_data.get("waiting_for_brand_list") and cleaned_q in AFFIRMATIONS:
+        session_data['waiting_for_brand_list'] = False # Clear this specific state
+        answer = respond_list_all_brands()
+        _session_manager.update_session(user_id, session_data)
+        return answer
+
+    # Is the user saying "yes" to the workbook offer?
+    if session_data.get("waiting_for_workbook_confirmation") and cleaned_q in AFFIRMATIONS:
+        session_data['waiting_for_workbook_confirmation'] = False # Clear this specific state
+        answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
+        _session_manager.update_session(user_id, session_data)
+        return answer
+
+    # --- Step 2: If no stateful action was taken, clear old "waiting" flags and detect new intents ---
+    # If we've reached this point, it means the user's input is a NEW topic, not a reply to a pending question.
+    # So, we can safely clear any old "waiting" flags.
+    session_data.update({
+        'waiting_for_quiz_start': False, 
+        'waiting_for_brand_list': False,
+        'waiting_for_workbook_confirmation': False
+    })
+    
     answer = ""
     proactive_suggestion = ""
+
+    # Intent: Start a routine/quiz
+    routine_type = detect_routine_intent(raw_q)
+    if routine_type:
+        answer = offer_quiz(session_data, routine_type)
+        _session_manager.update_session(user_id, session_data)
+        return answer
+        
+    # Intent: Greetings & Small Talk
+    if any(cleaned_q.startswith(g) for g in GREETINGS):
+        greeting_index = session_data.get('greeting_index', 0)
+        answer = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
+        session_data.update({'waiting_for_workbook_confirmation': True, 'greeting_index': greeting_index + 1})
+        _session_manager.update_session(user_id, session_data)
+        return answer
+        
+    if cleaned_q in SMALL_TALK:
+        return "I'm doing great, thanks for asking! Ready to help with your sustainability questions."
+        
+    # Intent: Brand questions
+    if re.search(r"\b(do you rank|ranking)\s*brands?\b", cleaned_q):
+        answer = "Yes, I can show you how brands score based on our data! I look at things like recycled materials and worker welfare. Would you like to see the full list of brands I track?"
+        session_data['waiting_for_brand_list'] = True
+        _session_manager.update_session(user_id, session_data)
+        return answer
+        
+    if re.search(r"\b(list|show)\s*brands?\b", cleaned_q):
+        return respond_list_all_brands()
+        
+    if re.match(r"^\s*rank\s+(.*)", cleaned_q):
+        brand_name = re.match(r"^\s*rank\s+(.*)", cleaned_q).group(1).strip()
+        return get_brand_ranking_single(brand_name)
+        
+    # Intent: Email signup
+    if re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and not session_data.get('email'):
+        session_data['email'] = raw_q
+        answer = "🎉 **Thanks for signing up!** You'll hear from us soon. What can I help you next?"
+        _session_manager.update_session(user_id, session_data)
+        return answer
+
+    # --- Step 3: Fallback to General RAG for everything else ---
     
-    # --- Highest Priority: Handle ongoing stateful conversations ---
-    if session_data.get("current_quiz_session"):
-        if cleaned_q.isdigit(): answer = answer_quiz_option(session_data, int(cleaned_q))
-        else:
-            session_data["current_quiz_session"] = None
-            # Let the new query be processed by the logic below
-    elif session_data.get("waiting_for_quiz_start") and cleaned_q in AFFIRMATIONS:
-        answer = start_quiz(session_data)
-    elif session_data.get("waiting_for_workbook_confirmation") and cleaned_q in AFFIRMATIONS:
-        session_data['waiting_for_workbook_confirmation'] = False
-        answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
-    elif session_data.get("waiting_for_brand_list") and cleaned_q in AFFIRMATIONS:
-        session_data['waiting_for_brand_list'] = False
-        answer = respond_list_all_brands()
+    # Handle short/vague queries that might be brand names
+    if len(cleaned_q.split()) <= 3:
+        candidates = fuzzy_lookup_brand_candidates(raw_q)
+        if len(candidates) == 1:
+            return get_brand_ranking_single(candidates[0])
+        elif len(candidates) > 1:
+            return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+        elif cleaned_q in AFFIRMATIONS:
+            return "Great! What can I help you with?"
 
-    # --- Second Priority: Handle intents that change the state or are conversational ---
-    if not answer:
-        routine_type = detect_routine_intent(raw_q)
-        if routine_type: answer = offer_quiz(session_data, routine_type)
-        elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and not session_data.get('email'):
-            session_data['email'] = raw_q
-            answer = "🎉 **Thanks for signing up!** You'll hear from us soon. What can I help you next?"
-        elif any(cleaned_q.startswith(g) for g in GREETINGS):
-            greeting_index = session_data.get('greeting_index', 0)
-            answer = f"{VARIED_GREETINGS[greeting_index % len(VARIED_GREETINGS)]} I also have a workbook — *Omi Live Tactical Workbook* 📘. Would you like me to send it?"
-            session_data.update({'waiting_for_workbook_confirmation': True, 'greeting_index': greeting_index + 1})
-        elif cleaned_q in SMALL_TALK:
-            answer = "I'm doing great, thanks for asking! Ready to help with your sustainability questions."
-        elif re.search(r"\b(do you rank|ranking)\s*brands?\b", cleaned_q):
-            answer = "Yes, I can show you how brands score based on our data! I look at things like recycled materials and worker welfare. Would you like to see the full list of brands I track?"
-            session_data['waiting_for_brand_list'] = True
-        elif re.search(r"\b(list|show)\s*brands?\b", cleaned_q):
-            answer = respond_list_all_brands()
-        elif re.match(r"^\s*rank\s+(.*)", cleaned_q):
-            brand_name = re.match(r"^\s*rank\s+(.*)", cleaned_q).group(1).strip()
-            answer = get_brand_ranking_single(brand_name)
+    # Perform RAG
+    context_docs = get_retriever().invoke(raw_q)
+    context = "\n\n".join(d.page_content for d in context_docs)
+    
+    if not context: 
+        answer = "I'm not sure I understand. Could you please provide more details?"
+    else:
+        prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+        answer = get_llm().invoke(prompt).content
+    
+    if 'founder' in cleaned_q or 'omi live' in cleaned_q:
+        proactive_suggestion = "\n\nI can also rank brands on their sustainability scores or help you with a personalized skin care quiz. What are you curious about?"
 
-    # --- Fallback: General RAG for everything else ---
-    if not answer:
-        session_data.update({'waiting_for_workbook_confirmation': False, 'waiting_for_quiz_start': False, 'waiting_for_brand_list': False})
-        
-        if len(cleaned_q.split()) <= 3: # Handle short/vague queries
-            candidates = fuzzy_lookup_brand_candidates(raw_q)
-            if len(candidates) == 1:
-                answer = get_brand_ranking_single(candidates[0])
-            elif len(candidates) > 1:
-                 answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-            elif cleaned_q in AFFIRMATIONS:
-                answer = "Great! What can I help you with?"
-            else:
-                 answer = "I'm not sure I understand. Could you please provide more details?"
-        
-        if not answer:
-            context_docs = get_retriever().invoke(raw_q)
-            context = "\n\n".join(d.page_content for d in context_docs)
-            if not context: answer = get_llm().invoke(raw_q).content
-            else:
-                prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-                answer = get_llm().invoke(prompt).content
-            
-            if 'founder' in cleaned_q or 'omi live' in cleaned_q:
-                proactive_suggestion = "\n\nI can also rank brands on their sustainability scores or help you with a personalized skin care quiz. What are you curious about?"
-
-    # --- Final Step: Append Newsletter Prompt ---
+    # Final Step: Append Newsletter Prompt & Update Session
     if session_data.get('response_count', 0) == 2 and not session_data.get('email'):
         answer += "\n\nWe're totally vibing! 💫 **Want to join our newsletter?** Just drop your email to sign up! 🌱"
         session_data['last_prompted_at'] = datetime.now().isoformat()
-
+    
     session_data['response_count'] += 1
     _session_manager.update_session(user_id, session_data)
+    
     return answer + proactive_suggestion
 
 # CLI test function
@@ -414,4 +462,3 @@ if __name__ == "__main__":
         if user_input.lower() in ['quit', 'exit']: break
         response = get_rag_response(user_input, cli_session)
         print(f"OMI: {response}")
-
