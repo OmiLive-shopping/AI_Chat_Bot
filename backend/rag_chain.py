@@ -160,7 +160,6 @@ def detect_routine_intent(question: str) -> Optional[str]:
     has_skin = any(word in cleaned_q for word in skin_keywords)
     if has_skin and not has_hair: return 'skin'
     if has_hair and not has_skin: return 'hair'
-    # Handle cases like "skin quiz" or "hair quiz" explicitly
     if 'skin' in cleaned_q and 'quiz' in cleaned_q: return 'skin'
     if 'hair' in cleaned_q and 'quiz' in cleaned_q: return 'hair'
     return None
@@ -273,15 +272,15 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     if not key: return []
     keys = df["brand_key"].tolist()
     matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.7)
-    # A second pass for partial matches like 'zerra' in 'zerra and co'
     if not matches:
         for b_key, b_name in zip(df["brand_key"], df["brand_name"]):
             if key in b_key.split():
-                matches.append(b_key)
+                if b_key not in matches:
+                    matches.append(b_key)
                 if len(matches) >= 3: break
     
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
-
+    
 # =========================
 # Quiz Logic
 # =========================
@@ -293,7 +292,7 @@ def offer_quiz(session_data: dict, quiz_type: str) -> str:
 
 def start_quiz(session_data: dict) -> str:
     quiz_type = session_data.get("quiz_type_pending")
-    if not quiz_type: return "I'm not sure which quiz you wanted to start."
+    if not quiz_type: return "I'm sorry, I seem to have forgotten which quiz you wanted to start. You can ask for 'skin care' or 'hair care'."
     
     session_data.update({"quiz_answers": [], "waiting_for_quiz_start": False, "quiz_type_pending": None})
     try:
@@ -342,8 +341,10 @@ def get_rag_response(question: str, chat_session: Any) -> str:
     if not raw_q: return "I don't know."
     cleaned_q = _clean_text(raw_q)
     print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
+    print(f"[DEBUG] Session state at start: {session_data}")
     
     is_affirmative = any(cleaned_q.startswith(a) for a in AFFIRMATIONS)
+    print(f"[DEBUG] Query: '{cleaned_q}', Is Affirmative: {is_affirmative}")
     
     # --- Step 1: Handle ongoing, stateful interactions FIRST ---
     if session_data.get("current_quiz_session"):
@@ -355,33 +356,28 @@ def get_rag_response(question: str, chat_session: Any) -> str:
             _session_manager.update_session(user_id, session_data)
             return answer
 
-    if session_data.get("waiting_for_quiz_start") and is_affirmative:
-        answer = start_quiz(session_data)
-        _session_manager.update_session(user_id, session_data)
-        return answer
-        
-    if session_data.get("waiting_for_rank_confirmation") and is_affirmative:
-        brand_to_rank = session_data.get("brand_to_rank")
-        session_data["waiting_for_rank_confirmation"] = False
-        session_data["brand_to_rank"] = None
-        if brand_to_rank:
-            answer = get_brand_ranking_single(brand_to_rank)
+    if session_data.get("waiting_for_quiz_start"):
+        print("[DEBUG] State: waiting_for_quiz_start")
+        if is_affirmative:
+            print("[DEBUG] Affirmation detected for quiz start.")
+            answer = start_quiz(session_data)
             _session_manager.update_session(user_id, session_data)
             return answer
+        
+    if session_data.get("waiting_for_rank_confirmation"):
+        print("[DEBUG] State: waiting_for_rank_confirmation")
+        if is_affirmative:
+            print("[DEBUG] Affirmation detected for rank confirmation.")
+            brand_to_rank = session_data.get("brand_to_rank")
+            session_data["waiting_for_rank_confirmation"] = False
+            session_data["brand_to_rank"] = None
+            _session_manager.update_session(user_id, session_data) # Update state now
+            if brand_to_rank:
+                return get_brand_ranking_single(brand_to_rank)
+            else:
+                return "I'm sorry, I seem to have forgotten which brand you asked about. Could you please tell me again?"
 
-    if session_data.get("waiting_for_brand_list") and is_affirmative:
-        session_data['waiting_for_brand_list'] = False
-        answer = respond_list_all_brands()
-        _session_manager.update_session(user_id, session_data)
-        return answer
-
-    if session_data.get("waiting_for_workbook_confirmation") and is_affirmative:
-        session_data['waiting_for_workbook_confirmation'] = False
-        answer = "Great! 🎉 You can download the workbook here: [**Download Workbook**](/get_workbook)"
-        _session_manager.update_session(user_id, session_data)
-        return answer
-
-    # --- Step 2: Clear old "waiting" flags and detect new intents ---
+    # --- Step 2: Clear old "waiting" flags (if any remain) and detect new intents ---
     session_data.update({
         'waiting_for_quiz_start': False, 'quiz_type_pending': None,
         'waiting_for_brand_list': False,
@@ -441,7 +437,7 @@ def get_rag_response(question: str, chat_session: Any) -> str:
         _session_manager.update_session(user_id, session_data)
         return answer
 
-    # --- Step 3: Fallback to General RAG for everything else ---
+    # --- Step 3: Fallback Logic ---
     if len(cleaned_q.split()) <= 4:
         candidates = fuzzy_lookup_brand_candidates(raw_q)
         if len(candidates) == 1:
