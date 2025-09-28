@@ -75,13 +75,6 @@ SYSTEM_PERSONA = (
     'When you don\'t know, say "I don\'t know." Never invent facts.'
 )
 
-# Varied greetings
-VARIED_GREETINGS = [
-    "Hey there! 👋 I'm Omi Bot, your guide to sustainable living and eco-friendly shopping!",
-    "Hello! 🌱 I'm Omi Bot, here to help you discover amazing sustainable brands and products!",
-    "Hi friend! ✨ I'm Omi Bot, ready to explore eco-friendly living and conscious shopping with you!",
-]
-
 # Prompts
 QA_PROMPT_GENERAL = PromptTemplate.from_template(
     """{persona}
@@ -142,21 +135,14 @@ class UserSessionManager:
 
 _session_manager = UserSessionManager(db)
 
-# --- THIS FUNCTION IS UPDATED ---
 def get_user_id(session_info: Any) -> str:
-    # Handles the string user_id passed from the updated app.py
     if isinstance(session_info, str):
         return session_info
-    
-    # Fallback for CLI testing, which might pass a dict
     if isinstance(session_info, dict):
         if "user_id" not in session_info:
             session_info["user_id"] = os.urandom(16).hex()
         return session_info["user_id"]
-    
-    # A safe default if the input is unexpected
     return os.urandom(16).hex()
-
 
 # =========================
 # Core Bot Logic (Stateless Helpers)
@@ -168,7 +154,6 @@ AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes
 
 def is_affirmative_response(text: str) -> bool:
     cleaned = _clean_text(text)
-    # Check if the cleaned text exactly matches or starts with any affirmation
     return any(cleaned == a or cleaned.startswith(a + " ") for a in AFFIRMATIONS)
 
 def detect_routine_intent(question: str) -> Optional[str]:
@@ -193,13 +178,11 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
-GREETINGS = ("hi", "hello", "hey")
-SMALL_TALK = ("how are you", "how are you doing")
 
 def get_llm() -> ChatVertexAI:
     global _llm
     if _llm: return _llm
-    _llm = ChatVertexAI(model_name="gemini-2.5-pro", temperature=0.5, max_output_tokens=1536)
+    _llm = ChatVertexAI(model_name="gemini-1.5-pro-001", temperature=0.5, max_output_tokens=1536)
     return _llm
 
 def get_retriever():
@@ -240,7 +223,7 @@ def get_brand_df() -> pd.DataFrame:
                 if "brand" in c and "name" in c:
                     df = df.rename(columns={c: "brand_name"})
                     break
-        df = df.dropna(subset=['brand_name'])
+        df = df.dropna(subset=['brand_name', 'final_score'])
         df = df[df["brand_name"].astype(str).str.strip().ne("")]
         df["brand_key"] = df["brand_name"].apply(_make_key)
         _brand_df = df
@@ -267,11 +250,20 @@ def get_brand_ranking_single(brand_name: str) -> str:
         response += "\n\n" + "\n".join(breakdown)
     return response
 
-def respond_list_all_brands() -> str:
+# --- NEW/UPDATED BRAND FUNCTION ---
+def respond_rank_all_brands() -> str:
     df = get_brand_df()
-    if df.empty: return "I don't have brand information right now."
-    brands = sorted(df["brand_name"].dropna().unique())
-    return "📊 **Yes! I track these brands:**\n" + ", ".join(brands)
+    if df.empty or 'final_score' not in df.columns:
+        return "I don't have brand ranking information right now."
+    
+    ranked_df = df.sort_values(by='final_score', ascending=False).head(6)
+    response_lines = ["Of course! Here are the brands ranked by their final sustainability score, from highest to lowest:\n"]
+    for i, row in enumerate(ranked_df.itertuples(), 1):
+        response_lines.append(f"{i}. **{row.brand_name}** ({row.final_score})")
+        
+    response_lines.append(f"\n* {ranked_df.iloc[0]['brand_name']} has the highest score in this list with {ranked_df.iloc[0]['final_score']} out of 30!")
+    response_lines.append("* This ranking is based on the \"Final Score\" which considers things like recycled materials, worker welfare, and local sourcing.")
+    return "\n".join(response_lines)
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     df = get_brand_df()
@@ -386,13 +378,20 @@ def get_rag_response(question: str, user_id: str) -> str:
         'waiting_for_rank_confirmation': False, 'brand_to_rank': None
     })
     
+    # Intent: Start a routine/quiz
     routine_type = detect_routine_intent(raw_q)
     if routine_type:
         answer = offer_quiz(session_data, routine_type)
         _session_manager.update_session(user_id, session_data)
         return answer
         
-    rank_match = re.match(r"^\s*rank\s+(.*)", _clean_text(raw_q))
+    # --- UPDATED: Brand Ranking Intent ---
+    cleaned_q = _clean_text(raw_q)
+    if "rank" in cleaned_q and "brand" in cleaned_q:
+        return respond_rank_all_brands()
+
+    # Intent: Brand questions (explicit "rank [name]" command)
+    rank_match = re.match(r"^\s*rank\s+(.*)", cleaned_q)
     if rank_match:
         brand_name_query = rank_match.group(1).strip()
         candidates = fuzzy_lookup_brand_candidates(brand_name_query)
@@ -403,6 +402,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         else:
             return f"I couldn't find a brand ranking for '{brand_name_query}'."
 
+    # Intent: Brand questions (short query, implicit rank)
     if len(raw_q.split()) <= 4:
         candidates = fuzzy_lookup_brand_candidates(raw_q)
         if len(candidates) == 1:
@@ -415,6 +415,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif len(candidates) > 1:
             return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
+    # Fallback to general RAG
     context_docs = get_retriever().invoke(raw_q)
     context = "\n\n".join(d.page_content for d in context_docs)
     

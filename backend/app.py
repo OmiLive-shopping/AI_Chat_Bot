@@ -29,11 +29,12 @@ CORS(app, origins=[origin.strip() for origin in allowed_origins.split(",") if or
 # Secret key for session
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "omi-chatbot-secret-fallback-key")
 
-# Secure session cookies
+# --- THIS IS THE FIX ---
+# Secure session cookies, setting SameSite=None for cross-domain contexts
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SAMESITE="None", # Changed from "Lax" to "None"
 )
 
 # =========================
@@ -86,14 +87,10 @@ def chat():
         if not user_input:
             return jsonify({"answer": "Empty message received"}), 400
         
-        # --- THIS IS THE FIX ---
-        # 1. Check if a user_id exists in the session.
         if 'user_id' not in session:
-            # 2. If not, create a new one and save it. This happens only once per user.
             session['user_id'] = os.urandom(16).hex()
             print(f"[INFO] New session created with user_id: {session['user_id']}")
 
-        # 3. Pass the persistent user_id (now a simple string) to the RAG chain.
         answer = get_rag_response(user_input, session['user_id'])
         
         return jsonify({"answer": answer})
@@ -135,7 +132,6 @@ def internal_error(error):
 # Run App
 # =========================
 if __name__ != "__main__":
-    # Preload when running with Gunicorn in Cloud Run
     print("[INFO] Preloading FAISS index for Gunicorn...")
     try:
         preload_faiss_index()
@@ -145,7 +141,6 @@ if __name__ != "__main__":
         traceback.print_exc()
 
 if __name__ == "__main__":
-    # Preload for local development
     print("[INFO] Preloading FAISS index for local development...")
     try:
         preload_faiss_index()
