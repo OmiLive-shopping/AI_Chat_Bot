@@ -128,7 +128,7 @@ class UserSessionManager:
             "last_prompted_at": None, "response_count": 0, "greeting_index": 0,
             "waiting_for_workbook_confirmation": False, "current_quiz_session": None,
             "quiz_answers": [], "waiting_for_quiz_start": False,
-            "waiting_for_brand_list": False,
+            "waiting_for_brand_list": False, "shown_brand_list": False,
             "waiting_for_rank_confirmation": False, "brand_to_rank": None,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
@@ -178,6 +178,7 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
+GREETINGS = ("hi", "hello", "hey")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -250,7 +251,6 @@ def get_brand_ranking_single(brand_name: str) -> str:
         response += "\n\n" + "\n".join(breakdown)
     return response
 
-# --- NEW/UPDATED BRAND FUNCTION ---
 def respond_rank_all_brands() -> str:
     df = get_brand_df()
     if df.empty or 'final_score' not in df.columns:
@@ -322,14 +322,26 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
         return get_next_quiz_question(session_data)
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
+# --- UPDATED: finish_quiz function ---
 def finish_quiz(session_data: dict) -> str:
     result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
     quiz_type = session_data["current_quiz_session"]["quiz_type"]
-    context = get_retriever().invoke(f"{result_type} {quiz_type} routine recommendation")
-    prompt = f"You are OMI. Based on this context, recommend a routine for {quiz_type} type: {result_type}.\n\nContext: {''.join(d.page_content for d in context)}"
+    
+    # Create a direct prompt for the LLM, without using RAG
+    prompt = (
+        f"{SYSTEM_PERSONA}\n\nA user has completed a {quiz_type} quiz. "
+        f"Their results indicate they have: **{result_type} {quiz_type}**. "
+        f"Please generate a simple, personalized, eco-friendly {quiz_type} care routine with 3-4 steps. "
+        f"For each step, recommend a *type* of product (e.g., 'a gentle hydrating cleanser' or 'a clarifying shampoo for oily scalps'). "
+        "Keep the descriptions brief and encouraging. Start the response with a friendly title."
+    )
+    
     recommendation = get_llm().invoke(prompt).content
-    session_data.update({"current_quiz_session": None, "quiz_answers": [], "waiting_for_workbook_confirmation": True})
-    return f"**Your {quiz_type} type:** *{result_type}*\n\n{recommendation}\n\n📘 Want me to send the *Omi Live Tactical Workbook*?"
+    
+    # Clean up session
+    session_data.update({"current_quiz_session": None, "quiz_answers": []})
+    
+    return f"Based on your answers, here is a routine for **{result_type} {quiz_type}**!\n\n{recommendation}"
 
 # =========================
 # Main Response Generator
@@ -339,12 +351,8 @@ def get_rag_response(question: str, user_id: str) -> str:
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
     
-    print(f"[DEBUG] User '{user_id}' asked: '{raw_q}'")
-    print(f"[DEBUG] Session state at start: {session_data}")
-    
     # --- BLOCK A: Handle responses to the bot's direct questions ---
     is_affirmative = is_affirmative_response(raw_q)
-    print(f"[DEBUG] Query: '{_clean_text(raw_q)}', Is Affirmative: {is_affirmative}")
 
     if session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
@@ -378,6 +386,22 @@ def get_rag_response(question: str, user_id: str) -> str:
         'waiting_for_rank_confirmation': False, 'brand_to_rank': None
     })
     
+    cleaned_q = _clean_text(raw_q)
+    
+    # --- UPDATED: Greeting Intent with Brand List ---
+    if cleaned_q in GREETINGS:
+        greeting = "Hello! I'm OMI, your friendly guide to sustainable shopping. I'm happy to help you make a big difference, one small choice at a time."
+        if not session_data.get('shown_brand_list'):
+            df = get_brand_df()
+            if not df.empty:
+                brands = sorted(df["brand_name"].dropna().unique())
+                brands_text = ", ".join(brands)
+                greeting += f"\n\nTo get you started, here are the brands I track:\n{brands_text}"
+                session_data['shown_brand_list'] = True
+        
+        _session_manager.update_session(user_id, session_data)
+        return greeting
+    
     # Intent: Start a routine/quiz
     routine_type = detect_routine_intent(raw_q)
     if routine_type:
@@ -385,12 +409,9 @@ def get_rag_response(question: str, user_id: str) -> str:
         _session_manager.update_session(user_id, session_data)
         return answer
         
-    # --- UPDATED: Brand Ranking Intent ---
-    cleaned_q = _clean_text(raw_q)
     if "rank" in cleaned_q and "brand" in cleaned_q:
         return respond_rank_all_brands()
 
-    # Intent: Brand questions (explicit "rank [name]" command)
     rank_match = re.match(r"^\s*rank\s+(.*)", cleaned_q)
     if rank_match:
         brand_name_query = rank_match.group(1).strip()
@@ -402,7 +423,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         else:
             return f"I couldn't find a brand ranking for '{brand_name_query}'."
 
-    # Intent: Brand questions (short query, implicit rank)
     if len(raw_q.split()) <= 4:
         candidates = fuzzy_lookup_brand_candidates(raw_q)
         if len(candidates) == 1:
@@ -415,7 +435,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif len(candidates) > 1:
             return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
-    # Fallback to general RAG
     context_docs = get_retriever().invoke(raw_q)
     context = "\n\n".join(d.page_content for d in context_docs)
     
