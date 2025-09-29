@@ -134,6 +134,9 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
+        // --- THIS IS THE FIX ---
+        // This tells the browser to send the session cookie to your backend.
+        credentials: "include",
       });
 
       if (!res.body) {
@@ -153,7 +156,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             ...prev,
             {
               type: "bot",
-              text: `💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community.  
+              text: `💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community.  
 
 And if you're a brand or creator, I've got a free detailed live shopping workbook I can send you too! What's your email? 🌱`,
               loading: false,
@@ -239,7 +242,7 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
           ...prev,
           {
             type: "bot",
-            text: `💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community.  
+            text: `💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community.  
 
 And if you're a brand or creator, I've got a free detailed live shopping workbook I can send you too! What's your email? 🌱`,
             loading: false,
@@ -274,6 +277,8 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
+        // Also adding here for consistency
+        credentials: "include",
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
