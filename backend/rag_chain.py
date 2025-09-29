@@ -150,7 +150,8 @@ def get_user_id(session_info: Any) -> str:
 def _clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", str(text).lower()).strip()
 
-AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start"}
+# --- UPDATED: More Affirmations ---
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start", "we can", "sure", "yup", "yep"}
 
 def is_affirmative_response(text: str) -> bool:
     cleaned = _clean_text(text)
@@ -322,26 +323,30 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
         return get_next_quiz_question(session_data)
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
-# --- UPDATED: finish_quiz function ---
+# --- UPDATED: More Robust finish_quiz function ---
 def finish_quiz(session_data: dict) -> str:
-    result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
-    quiz_type = session_data["current_quiz_session"]["quiz_type"]
-    
-    # Create a direct prompt for the LLM, without using RAG
-    prompt = (
-        f"{SYSTEM_PERSONA}\n\nA user has completed a {quiz_type} quiz. "
-        f"Their results indicate they have: **{result_type} {quiz_type}**. "
-        f"Please generate a simple, personalized, eco-friendly {quiz_type} care routine with 3-4 steps. "
-        f"For each step, recommend a *type* of product (e.g., 'a gentle hydrating cleanser' or 'a clarifying shampoo for oily scalps'). "
-        "Keep the descriptions brief and encouraging. Start the response with a friendly title."
-    )
-    
-    recommendation = get_llm().invoke(prompt).content
-    
-    # Clean up session
-    session_data.update({"current_quiz_session": None, "quiz_answers": []})
-    
-    return f"Based on your answers, here is a routine for **{result_type} {quiz_type}**!\n\n{recommendation}"
+    try:
+        result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
+        quiz_type = session_data["current_quiz_session"]["quiz_type"]
+        
+        prompt = (
+            f"{SYSTEM_PERSONA}\n\nA user has completed a {quiz_type} quiz. "
+            f"Their results indicate they have: **{result_type} {quiz_type}**. "
+            f"Please generate a simple, personalized, eco-friendly {quiz_type} care routine with 3-4 steps. "
+            f"For each step, recommend a *type* of product (e.g., 'a gentle hydrating cleanser' or 'a clarifying shampoo for oily scalps'). "
+            "Keep the descriptions brief and encouraging. Start the response with a friendly title."
+        )
+        
+        recommendation = get_llm().invoke(prompt).content
+        
+        session_data.update({"current_quiz_session": None, "quiz_answers": []})
+        
+        return f"Based on your answers, here is a routine for **{result_type} {quiz_type}**!\n\n{recommendation}"
+    except Exception as e:
+        print(f"[ERROR] in finish_quiz: {e}")
+        traceback.print_exc()
+        session_data.update({"current_quiz_session": None, "quiz_answers": []})
+        return "I had a little trouble generating your routine. Please try asking for the quiz again!"
 
 # =========================
 # Main Response Generator
@@ -351,7 +356,6 @@ def get_rag_response(question: str, user_id: str) -> str:
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
     
-    # --- BLOCK A: Handle responses to the bot's direct questions ---
     is_affirmative = is_affirmative_response(raw_q)
 
     if session_data.get("current_quiz_session"):
@@ -380,7 +384,6 @@ def get_rag_response(question: str, user_id: str) -> str:
             else:
                 return "I'm sorry, I seem to have forgotten which brand you asked about. Could you please tell me again?"
 
-    # --- BLOCK B: Handle a new query from the user ---
     session_data.update({
         'waiting_for_quiz_start': False, 'quiz_type_pending': None,
         'waiting_for_rank_confirmation': False, 'brand_to_rank': None
@@ -388,21 +391,19 @@ def get_rag_response(question: str, user_id: str) -> str:
     
     cleaned_q = _clean_text(raw_q)
     
-    # --- UPDATED: Greeting Intent with Brand List ---
     if cleaned_q in GREETINGS:
-        greeting = "Hello! I'm OMI, your friendly guide to sustainable shopping. I'm happy to help you make a big difference, one small choice at a time."
+        greeting = "Hi there! I'm OMI, your friendly guide to sustainable shopping. I'm happy to help you make a big difference, one small choice at a time."
         if not session_data.get('shown_brand_list'):
             df = get_brand_df()
             if not df.empty:
                 brands = sorted(df["brand_name"].dropna().unique())
                 brands_text = ", ".join(brands)
-                greeting += f"\n\nTo get you started, here are the brands I track:\n{brands_text}"
+                greeting += f"\n\nTo get you started, here are some of the brands I track:\n{brands_text}"
                 session_data['shown_brand_list'] = True
         
         _session_manager.update_session(user_id, session_data)
         return greeting
     
-    # Intent: Start a routine/quiz
     routine_type = detect_routine_intent(raw_q)
     if routine_type:
         answer = offer_quiz(session_data, routine_type)
