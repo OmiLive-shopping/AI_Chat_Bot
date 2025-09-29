@@ -150,7 +150,6 @@ def get_user_id(session_info: Any) -> str:
 def _clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", str(text).lower()).strip()
 
-# --- UPDATED: More Affirmations ---
 AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start", "we can", "sure", "yup", "yep"}
 
 def is_affirmative_response(text: str) -> bool:
@@ -323,7 +322,6 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
         return get_next_quiz_question(session_data)
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
-# --- UPDATED: More Robust finish_quiz function ---
 def finish_quiz(session_data: dict) -> str:
     try:
         result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
