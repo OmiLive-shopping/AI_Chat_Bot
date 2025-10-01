@@ -18,7 +18,7 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // --- RESTORED: Initial greeting is now hardcoded again ---
+  // Initial greeting
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -38,16 +38,17 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   }, []);
   
-  // --- NEW: Automatically trigger the next message after the greeting ---
+  // Trigger onboarding question
   useEffect(() => {
-    // This runs when the messages array changes
     const lastMessage = messages[messages.length - 1];
-    if (messages.length === 1 && lastMessage.type === 'bot' && lastMessage.text.includes("What can I help you with today?")) {
-      // Send a special trigger to the backend to get the onboarding question
+    if (
+      messages.length === 1 &&
+      lastMessage.type === "bot" &&
+      lastMessage.text.includes("What can I help you with today?")
+    ) {
       handleSend("__GET_ONBOARDING__");
     }
   }, [messages]);
-
 
   // Auto-resize input
   useEffect(() => {
@@ -70,31 +71,34 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // Auto-scroll function
+  // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
-        chatBoxRef.current.scrollTo({
-          top: chatBoxRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      }
+      chatBoxRef.current.scrollTo({
+        top: chatBoxRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
     return () => stopContinuousScrolling();
   }, [messages]);
 
-
   const handleSend = async (messageOverride) => {
-    const message = typeof messageOverride === 'string' ? messageOverride : input.trim();
+    const message =
+      typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
     setIsLoading(true);
-    
+
     if (message !== "__GET_ONBOARDING__") {
-        setMessages((prev) => [...prev, { type: "user", text: message }]);
+      setMessages((prev) => [...prev, { type: "user", text: message }]);
     }
     setInput("");
 
-    setMessages((prev) => [...prev, { type: "bot", text: "OmiBot is thinking...", loading: true }]);
-    
+    setMessages((prev) => [
+      ...prev,
+      { type: "bot", text: "OmiBot is thinking...", loading: true },
+    ]);
+
     scrollIntervalRef.current = setInterval(() => {
       if (chatBoxRef.current) {
         chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -111,10 +115,16 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
 
       if (!res.body) {
         const data = await res.json();
-        const finalAnswer = data.answer || "I'm having a little trouble right now.";
+        const finalAnswer =
+          data.answer || "I'm having a little trouble right now.";
         setMessages((prev) => {
-            const updated = prev.filter(msg => msg.text !== "OmiBot is thinking...");
-            return [...updated, { type: "bot", text: finalAnswer, loading: false, streaming: false }];
+          const updated = prev.filter(
+            (msg) => msg.text !== "OmiBot is thinking..."
+          );
+          return [
+            ...updated,
+            { type: "bot", text: finalAnswer, loading: false, streaming: false },
+          ];
         });
         return;
       }
@@ -123,43 +133,78 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       const decoder = new TextDecoder();
       let botMessage = "";
 
-      setMessages(prev => {
-          const updated = prev.filter(msg => msg.text !== "OmiBot is thinking...");
-          return [...updated, { type: "bot", text: "", loading: true, streaming: true }];
+      setMessages((prev) => {
+        const updated = prev.filter(
+          (msg) => msg.text !== "OmiBot is thinking..."
+        );
+        return [
+          ...updated,
+          { type: "bot", text: "", loading: true, streaming: true },
+        ];
       });
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        botMessage += decoder.decode(value, { stream: true });
+        const chunk = decoder.decode(value, { stream: true });
+
+        // Try parsing chunk as JSON
+        try {
+          const parsed = JSON.parse(chunk);
+          if (parsed.answer) {
+            botMessage += parsed.answer;
+          } else {
+            botMessage += chunk;
+          }
+        } catch {
+          // If not valid JSON, just append raw text
+          botMessage += chunk;
+        }
 
         setMessages((prev) => {
           const updated = [...prev];
           const lastIndex = updated.length - 1;
-          if (lastIndex >= 0 && updated[lastIndex].type === "bot" && updated[lastIndex].streaming) {
-            updated[lastIndex] = { ...updated[lastIndex], text: botMessage, loading: true };
+          if (
+            lastIndex >= 0 &&
+            updated[lastIndex].type === "bot" &&
+            updated[lastIndex].streaming
+          ) {
+            updated[lastIndex] = {
+              ...updated[lastIndex],
+              text: botMessage,
+              loading: true,
+            };
           }
           return updated;
         });
       }
-      
     } catch (err) {
       console.error("Fetch error:", err);
       setMessages((prev) => {
-        const updated = prev.filter(msg => msg.text !== "OmiBot is thinking...");
-        return [...updated, { type: "bot", text: `⚠️ Error: Could not connect to the server.`, loading: false, streaming: false }];
+        const updated = prev.filter(
+          (msg) => msg.text !== "OmiBot is thinking..."
+        );
+        return [
+          ...updated,
+          {
+            type: "bot",
+            text: `⚠️ Error: Could not connect to the server.`,
+            loading: false,
+            streaming: false,
+          },
+        ];
       });
     } finally {
       stopContinuousScrolling();
       setMessages((prev) => {
-          const updated = [...prev];
-          const lastIndex = updated.length - 1;
-          if (lastIndex >= 0 && updated[lastIndex].type === 'bot') {
-              updated[lastIndex].loading = false;
-              updated[lastIndex].streaming = false;
-          }
-          return updated;
+        const updated = [...prev];
+        const lastIndex = updated.length - 1;
+        if (lastIndex >= 0 && updated[lastIndex].type === "bot") {
+          updated[lastIndex].loading = false;
+          updated[lastIndex].streaming = false;
+        }
+        return updated;
       });
       setIsLoading(false);
     }
@@ -188,7 +233,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           loading: false,
         },
       ]);
-      
     } catch (err) {
       console.error("Failed to register email:", err);
     }
@@ -205,9 +249,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       },
     ]);
   };
-  
+
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-  const showOnboardingButtons = lastMessage && lastMessage.type === 'bot' && lastMessage.text.includes("1. A Consumer");
+  const showOnboardingButtons =
+    lastMessage &&
+    lastMessage.type === "bot" &&
+    lastMessage.text.includes("1. A Consumer");
 
   return (
     <div id="chat-popup">
@@ -268,14 +315,18 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         {showOnboardingButtons ? (
           <div className="onboarding-buttons">
             <button onClick={() => handleSend("Consumer")}>Consumer</button>
-            <button onClick={() => handleSend("Brand or Creator")}>Brand or Creator</button>
+            <button onClick={() => handleSend("Brand or Creator")}>
+              Brand or Creator
+            </button>
           </div>
         ) : (
           <div className="input-bar">
             <textarea
               ref={textareaRef}
               rows="1"
-              placeholder={isLoading ? "OmiBot is thinking..." : "Ask me something..."}
+              placeholder={
+                isLoading ? "OmiBot is thinking..." : "Ask me something..."
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
