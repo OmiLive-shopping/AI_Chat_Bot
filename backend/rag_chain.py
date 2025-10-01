@@ -61,7 +61,6 @@ DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
 KB_PATH = os.path.join(DATA_DIR, "omilive_knowledge_base.txt")
 BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
-# --- IMPORTANT: Make sure this filename EXACTLY matches your file in the data/ folder ---
 WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx" 
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
@@ -252,9 +251,10 @@ def get_brand_ranking_single(brand_name: str) -> str:
     breakdown_cols = [ "recycled/upcycled_materials", "end_of_life_solutions_(compostable_packaging/zero_waste)", "worker_welfare/living_wage", "local_sourcing", "sustainability_data_accessibility", "marketing_honesty/_certifications" ]
     breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
 
+    # --- UPDATED: Switched from \n\n to \n for tighter spacing ---
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
     if breakdown:
-        response += "\n\n" + "\n".join(breakdown)
+        response += "\n" + "\n".join(breakdown)
     return response
 
 def respond_rank_all_brands() -> str:
@@ -274,6 +274,14 @@ def respond_rank_all_brands() -> str:
     response_lines.append("\nI also track the following brands: " + ", ".join(all_brands))
     
     return "\n".join(response_lines)
+    
+def respond_list_all_brands() -> str:
+    df = get_brand_df()
+    if df.empty:
+        return "I don't have brand information right now."
+    brands = sorted(df["brand_name"].dropna().unique())
+    return "Here are all the brands I track:\n\n" + ", ".join(brands)
+
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     df = get_brand_df()
@@ -359,129 +367,124 @@ def get_rag_response(question: str, user_id: str) -> str:
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
 
-    if raw_q == "__GET_ONBOARDING__":
-        session_data['response_count'] = session_data.get('response_count', 0) + 1
-        session_data['waiting_for_user_classification'] = True
-        _session_manager.update_session(user_id, session_data)
-        return "To personalize your experience, please let me know who you are."
-
-    session_data['response_count'] = session_data.get('response_count', 0) + 1
+    # This is now the single exit point for all responses
     answer = ""
+    
+    # Increment response count early, but handle init case
+    if raw_q != "__GET_ONBOARDING__":
+        session_data['response_count'] = session_data.get('response_count', 0) + 1
 
     is_affirmative = is_affirmative_response(raw_q)
     is_negative = is_negative_response(raw_q)
 
-    # --- BLOCK A: Handle responses to the bot's direct questions ---
-    if session_data.get("waiting_for_user_classification"):
+    # --- BLOCK A: Handle special triggers and stateful responses ---
+    if raw_q == "__GET_ONBOARDING__":
+        session_data['waiting_for_user_classification'] = True
+        answer = "To personalize your experience, please let me know who you are."
+    
+    elif session_data.get("waiting_for_user_classification"):
         cleaned_q = _clean_text(raw_q)
         session_data['waiting_for_user_classification'] = False
-        
         if cleaned_q == '1' or 'consumer' in cleaned_q:
             session_data['user_type'] = 'consumer'
             answer = "Great, thanks for letting me know! As a consumer, you can ask me to rank brands, find your personalized hair or skin care routine, or ask any questions about sustainable shopping. How can I help?"
-        
         elif cleaned_q == '2' or 'brand' in cleaned_q or 'creator' in cleaned_q:
             session_data['user_type'] = 'brand_creator'
             session_data['waiting_for_workbook_confirmation'] = True
             answer = "Welcome! For brands and creators, I can offer our *Omi Live Tactical Workbook* to guide your sustainability journey. Would you like me to send it to you?"
-        
         else: 
             session_data['waiting_for_user_classification'] = True 
             answer = "Please choose a valid option by clicking one of the buttons below."
-        
-        _session_manager.update_session(user_id, session_data)
-        return answer
-
-    if session_data.get("current_quiz_session"):
+    
+    elif session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
             answer = answer_quiz_option(session_data, int(_clean_text(raw_q)))
         else:
             session_data["current_quiz_session"] = None
             answer = "Quiz cancelled. How can I help?"
-        _session_manager.update_session(user_id, session_data)
-        return answer
-
-    if session_data.get("waiting_for_quiz_start"):
+    
+    elif session_data.get("waiting_for_quiz_start"):
         if is_affirmative:
             answer = start_quiz(session_data)
-            _session_manager.update_session(user_id, session_data)
-            return answer
-        
-    if session_data.get("waiting_for_rank_confirmation"):
+        else: # Any other text cancels the quiz offer
+            session_data["waiting_for_quiz_start"] = False
+            # Fall through to treat as a new query
+            
+    elif session_data.get("waiting_for_rank_confirmation"):
         if is_affirmative:
             brand_to_rank = session_data.get("brand_to_rank")
-            session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
-            _session_manager.update_session(user_id, session_data)
             if brand_to_rank:
-                return get_brand_ranking_single(brand_to_rank)
+                answer = get_brand_ranking_single(brand_to_rank)
         elif is_negative:
-            session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
-            _session_manager.update_session(user_id, session_data)
-            return "Got it, no problem! How else can I help?"
+            answer = "Got it, no problem! How else can I help?"
+        session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
             
-    if session_data.get("waiting_for_workbook_confirmation"):
+    elif session_data.get("waiting_for_workbook_confirmation"):
         if is_affirmative:
-            session_data['waiting_for_workbook_confirmation'] = False
-            _session_manager.update_session(user_id, session_data)
-            return "Excellent! You can download the workbook here: [Download Workbook](/get_workbook)"
+            backend_url = os.environ.get("BACKEND_URL", "")
+            if backend_url:
+                download_link = f"{backend_url}/get_workbook"
+                answer = f"Excellent! You can download the workbook here: [Download Workbook]({download_link})"
+            else:
+                answer = "Excellent! You can download the workbook from the /get_workbook endpoint."
         elif is_negative:
-            session_data['waiting_for_workbook_confirmation'] = False
-            _session_manager.update_session(user_id, session_data)
-            return "No problem! What else can I help you with today?"
+            answer = "No problem! What else can I help you with today?"
+        session_data['waiting_for_workbook_confirmation'] = False
 
-    # --- BLOCK B: Handle a new query from the user ---
-    session_data.update({
-        'waiting_for_quiz_start': False, 'quiz_type_pending': None,
-        'waiting_for_rank_confirmation': False, 'brand_to_rank': None
-    })
-    
-    cleaned_q = _clean_text(raw_q)
-    
-    if cleaned_q in SMALL_TALK:
-        _session_manager.update_session(user_id, session_data)
-        return "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
-    
-    routine_type = detect_routine_intent(raw_q)
-    if routine_type:
-        answer = offer_quiz(session_data, routine_type)
-        _session_manager.update_session(user_id, session_data)
-        return answer
+    # --- BLOCK B: Handle new queries if no stateful response was generated ---
+    if not answer:
+        session_data.update({
+            'waiting_for_quiz_start': False, 'quiz_type_pending': None,
+            'waiting_for_rank_confirmation': False, 'brand_to_rank': None
+        })
         
-    if "rank" in cleaned_q and "brand" in cleaned_q:
-        return respond_rank_all_brands()
+        cleaned_q = _clean_text(raw_q)
+        
+        if cleaned_q in SMALL_TALK:
+            answer = "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
+        
+        elif "list" in cleaned_q and "brand" in cleaned_q:
+             answer = respond_list_all_brands()
 
-    rank_match = re.match(r"^\s*rank\s+(.*)", cleaned_q)
-    if rank_match:
-        brand_name_query = rank_match.group(1).strip()
-        candidates = fuzzy_lookup_brand_candidates(brand_name_query)
-        if len(candidates) == 1:
-            return get_brand_ranking_single(candidates[0])
-        elif len(candidates) > 1:
-            return f"I found a few brands that match '{brand_name_query}'. Which one did you mean?\n- " + "\n- ".join(candidates)
+        elif "rank" in cleaned_q and "brand" in cleaned_q:
+            answer = respond_rank_all_brands()
+
         else:
-            return f"I couldn't find a brand ranking for '{brand_name_query}'."
+            routine_type = detect_routine_intent(raw_q)
+            if routine_type:
+                answer = offer_quiz(session_data, routine_type)
+            else:
+                rank_match = re.match(r"^\s*rank\s+(.*)", cleaned_q)
+                if rank_match:
+                    brand_name_query = rank_match.group(1).strip()
+                    candidates = fuzzy_lookup_brand_candidates(brand_name_query)
+                    if len(candidates) == 1:
+                        answer = get_brand_ranking_single(candidates[0])
+                    elif len(candidates) > 1:
+                        answer = f"I found a few brands that match '{brand_name_query}'. Which one did you mean?\n- " + "\n- ".join(candidates)
+                    else:
+                        answer = f"I couldn't find a brand ranking for '{brand_name_query}'."
+                
+                elif len(raw_q.split()) <= 4 and not is_affirmative and not is_negative:
+                    candidates = fuzzy_lookup_brand_candidates(raw_q)
+                    if len(candidates) == 1:
+                        brand_name = candidates[0]
+                        session_data["waiting_for_rank_confirmation"] = True
+                        session_data["brand_to_rank"] = brand_name
+                        answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
+                    elif len(candidates) > 1:
+                        answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
-    if len(raw_q.split()) <= 4 and not is_affirmative and not is_negative:
-        candidates = fuzzy_lookup_brand_candidates(raw_q)
-        if len(candidates) == 1:
-            brand_name = candidates[0]
-            session_data["waiting_for_rank_confirmation"] = True
-            session_data["brand_to_rank"] = brand_name
-            answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
-            _session_manager.update_session(user_id, session_data)
-            return answer
-        elif len(candidates) > 1:
-            return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-
-    context_docs = get_retriever().invoke(raw_q)
-    context = "\n\n".join(d.page_content for d in context_docs)
+                if not answer: # Fallback to general RAG
+                    context_docs = get_retriever().invoke(raw_q)
+                    context = "\n\n".join(d.page_content for d in context_docs)
+                    if not context.strip():
+                        answer = "I don't know."
+                    else:
+                        prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+                        answer = get_llm().invoke(prompt).content
     
-    if not context.strip():
-        answer = "I don't know."
-    else:
-        prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-        answer = get_llm().invoke(prompt).content
-    
+    # --- Final Step: Append newsletter prompt if needed ---
     if session_data.get('response_count') == 3 and not session_data.get('email_prompted'):
         session_data['email_prompted'] = True
         user_type = session_data.get('user_type')
@@ -492,7 +495,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                 "You'll get early access to sustainable brand deals and new eco finds.\n\n"
                 "I've also got a free detailed live shopping workbook I can send you too! What's your email? 🌱"
             )
-        else:
+        else: # Default to consumer or if user_type is not set
             newsletter_prompt = (
                 "\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                 "You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community."
