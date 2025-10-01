@@ -61,7 +61,8 @@ DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
 KB_PATH = os.path.join(DATA_DIR, "omilive_knowledge_base.txt")
 BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
-WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.docx"
+# --- IMPORTANT: Make sure this filename EXACTLY matches your file in the data/ folder ---
+WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx" 
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
 QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
@@ -183,6 +184,9 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
+GREETINGS = ("hi", "hello", "hey")
+# --- NEW: Small Talk Handler ---
+SMALL_TALK = ("how are you", "how are you doing", "whats up")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -356,8 +360,7 @@ def get_rag_response(question: str, user_id: str) -> str:
     session_data = _session_manager.get_session(user_id)
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
-
-    # --- MODIFIED: Handle new automated trigger from frontend ---
+    
     if raw_q == "__GET_ONBOARDING__":
         session_data['response_count'] = session_data.get('response_count', 0) + 1
         session_data['waiting_for_user_classification'] = True
@@ -437,6 +440,11 @@ def get_rag_response(question: str, user_id: str) -> str:
     
     cleaned_q = _clean_text(raw_q)
     
+    # --- NEW: Handle Small Talk ---
+    if cleaned_q in SMALL_TALK:
+        _session_manager.update_session(user_id, session_data)
+        return "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
+    
     routine_type = detect_routine_intent(raw_q)
     if routine_type:
         answer = offer_quiz(session_data, routine_type)
@@ -478,7 +486,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
         answer = get_llm().invoke(prompt).content
     
-    if session_data.get('response_count') == 3 and not session_data.get('email_prompted'):
+    if session_data.get('response_count') == 4 and not session_data.get('email_prompted'): # Adjusted count for new flow
         session_data['email_prompted'] = True
         user_type = session_data.get('user_type')
         
