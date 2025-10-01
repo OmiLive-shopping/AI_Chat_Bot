@@ -1,5 +1,6 @@
 // frontend/src/components/ChatMessage.jsx
 import React, { useEffect, useState } from "react";
+import ReactMarkdown from 'react-markdown'; // --- NEW: Import the markdown renderer
 import "./ChatMessage.css";
 
 export default function ChatMessage({ type, text, loading }) {
@@ -34,7 +35,16 @@ export default function ChatMessage({ type, text, loading }) {
             </p>
           </div>
         ) : (
-          <span>{text}</span>
+          // --- MODIFIED: Replaced <span> with <ReactMarkdown> ---
+          // This will automatically convert markdown links into clickable HTML links
+          <ReactMarkdown
+            components={{
+              // This makes links open in a new tab for a better user experience
+              a: ({node, ...props}) => <a {...props} target="_blank" rel="noopener noreferrer" />
+            }}
+          >
+            {text}
+          </ReactMarkdown>
         )}
       </div>
     </div>
