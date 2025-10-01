@@ -61,7 +61,6 @@ DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
 KB_PATH = os.path.join(DATA_DIR, "omilive_knowledge_base.txt")
 BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
-# --- UPDATED: Corrected workbook filename extension ---
 WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.docx"
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
@@ -129,8 +128,8 @@ class UserSessionManager:
             "quiz_answers": [], "waiting_for_quiz_start": False,
             "waiting_for_rank_confirmation": False, "brand_to_rank": None,
             "waiting_for_workbook_confirmation": False,
-            # --- NEW: State for onboarding ---
-            "waiting_for_user_classification": False,
+            "waiting_for_user_classification": False, "user_type": None,
+            "email_prompted": False,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -357,31 +356,41 @@ def get_rag_response(question: str, user_id: str) -> str:
     session_data = _session_manager.get_session(user_id)
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
-    
+
+    # --- MODIFIED: Handle new automated trigger from frontend ---
+    if raw_q == "__GET_ONBOARDING__":
+        session_data['response_count'] = session_data.get('response_count', 0) + 1
+        session_data['waiting_for_user_classification'] = True
+        _session_manager.update_session(user_id, session_data)
+        return ("To personalize your experience, please let me know who you are:\n\n"
+                "1. A Consumer\n2. A Brand or Creator")
+
     session_data['response_count'] = session_data.get('response_count', 0) + 1
-    
+    answer = ""
+
     is_affirmative = is_affirmative_response(raw_q)
     is_negative = is_negative_response(raw_q)
 
     # --- BLOCK A: Handle responses to the bot's direct questions ---
-    
-    # --- NEW: Handle user classification onboarding ---
     if session_data.get("waiting_for_user_classification"):
         cleaned_q = _clean_text(raw_q)
-        session_data['waiting_for_user_classification'] = False # Consume this state
+        session_data['waiting_for_user_classification'] = False
         
         if cleaned_q == '1' or 'consumer' in cleaned_q:
-            _session_manager.update_session(user_id, session_data)
-            return "Great! As a consumer, you can ask me about our green rating system, get personalized skincare or haircare routines, and discover sustainable brands. What are you curious about first? You can also ask to join our beta!"
+            session_data['user_type'] = 'consumer'
+            answer = "Great, thanks for letting me know! As a consumer, you can ask me to rank brands, find your personalized hair or skin care routine, or ask any questions about sustainable shopping. How can I help?"
         
         elif cleaned_q == '2' or 'brand' in cleaned_q or 'creator' in cleaned_q:
+            session_data['user_type'] = 'brand_creator'
             session_data['waiting_for_workbook_confirmation'] = True
-            _session_manager.update_session(user_id, session_data)
-            return "Welcome! For brands and creators, I can offer our *Omi Live Tactical Workbook* to guide your sustainability journey. Would you like me to send it to you?"
+            answer = "Welcome! For brands and creators, I can offer our *Omi Live Tactical Workbook* to guide your sustainability journey. Would you like me to send it to you?"
         
-        else: # Invalid option
-            _session_manager.update_session(user_id, session_data)
-            return "Please choose a valid option. Are you a Consumer (1) or a Brand/Creator (2)?"
+        else: 
+            session_data['waiting_for_user_classification'] = True 
+            answer = "Please choose a valid option. Are you a Consumer (1) or a Brand/Creator (2)?"
+        
+        _session_manager.update_session(user_id, session_data)
+        return answer
 
     if session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
@@ -420,7 +429,6 @@ def get_rag_response(question: str, user_id: str) -> str:
             _session_manager.update_session(user_id, session_data)
             return "No problem! What else can I help you with today?"
 
-
     # --- BLOCK B: Handle a new query from the user ---
     session_data.update({
         'waiting_for_quiz_start': False, 'quiz_type_pending': None,
@@ -428,12 +436,6 @@ def get_rag_response(question: str, user_id: str) -> str:
     })
     
     cleaned_q = _clean_text(raw_q)
-    
-    # --- NEW: Trigger onboarding on first message ---
-    if session_data.get('response_count', 0) == 1:
-        session_data['waiting_for_user_classification'] = True
-        _session_manager.update_session(user_id, session_data)
-        return "Welcome to Omi! To personalize your experience, please let me know who you are:\n\n1. A Consumer\n2. A Brand or Creator"
     
     routine_type = detect_routine_intent(raw_q)
     if routine_type:
@@ -471,10 +473,27 @@ def get_rag_response(question: str, user_id: str) -> str:
     context = "\n\n".join(d.page_content for d in context_docs)
     
     if not context.strip():
-        return "I don't know."
-
-    prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-    answer = get_llm().invoke(prompt).content
+        answer = "I don't know."
+    else:
+        prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+        answer = get_llm().invoke(prompt).content
+    
+    if session_data.get('response_count') == 3 and not session_data.get('email_prompted'):
+        session_data['email_prompted'] = True
+        user_type = session_data.get('user_type')
+        
+        if user_type == 'brand_creator':
+            newsletter_prompt = (
+                "\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+                "You'll get early access to sustainable brand deals and new eco finds.\n\n"
+                "I've also got a free detailed live shopping workbook I can send you too! What's your email? 🌱"
+            )
+        else:
+            newsletter_prompt = (
+                "\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+                "You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community."
+            )
+        answer += newsletter_prompt
     
     _session_manager.update_session(user_id, session_data)
     

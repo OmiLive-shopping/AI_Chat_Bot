@@ -356,3 +356,26 @@ textarea:disabled {
     margin: 15px auto;
   }
 }
+
+/* Add this to your main CSS file for the chatbot */
+.onboarding-buttons {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border-top: 1px solid #eee;
+}
+
+.onboarding-buttons button {
+  flex-grow: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background-color 0.2s;
+}
+
+.onboarding-buttons button:hover {
+  background-color: #eee;
+}

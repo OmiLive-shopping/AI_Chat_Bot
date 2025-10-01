@@ -13,15 +13,12 @@ export default function ChatPopup({ onClose }) {
   );
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [userRequestCount, setUserRequestCount] = useState(0); // track user requests
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
-  const endRef = useRef(null);
-  const scrollTimeoutRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Greeting on mount
+  // --- RESTORED: Initial greeting is now hardcoded again ---
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -40,6 +37,17 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       ]);
     }
   }, []);
+  
+  // --- NEW: Automatically trigger the next message after the greeting ---
+  useEffect(() => {
+    // This runs when the messages array changes
+    const lastMessage = messages[messages.length - 1];
+    if (messages.length === 1 && lastMessage.type === 'bot' && lastMessage.text.includes("What can I help you with today?")) {
+      // Send a special trigger to the backend to get the onboarding question
+      handleSend("__GET_ONBOARDING__");
+    }
+  }, [messages]);
+
 
   // Auto-resize input
   useEffect(() => {
@@ -48,38 +56,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
-  // Focus input on mount
+  // Focus input
   useEffect(() => {
-    textareaRef.current?.focus();
-  }, []);
-
-  // Auto-scroll function
-  const scrollToBottom = () => {
-    if (scrollTimeoutRef.current) {
-      clearTimeout(scrollTimeoutRef.current);
+    if (textareaRef.current && !showOnboardingButtons) {
+      textareaRef.current.focus();
     }
-    scrollTimeoutRef.current = setTimeout(() => {
-      if (chatBoxRef.current) {
-        chatBoxRef.current.scrollTo({
-          top: chatBoxRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      }
-    }, 50);
-  };
-
-  // Continuous scrolling during typewriter effect
-  const startContinuousScrolling = () => {
-    stopContinuousScrolling();
-    scrollIntervalRef.current = setInterval(() => {
-      if (chatBoxRef.current) {
-        chatBoxRef.current.scrollTo({
-          top: chatBoxRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      }
-    }, 100);
-  };
+  }, [isLoading, messages]);
 
   const stopContinuousScrolling = () => {
     if (scrollIntervalRef.current) {
@@ -88,182 +70,98 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
+  // Auto-scroll function
   useEffect(() => {
-    scrollToBottom();
+    if (chatBoxRef.current) {
+        chatBoxRef.current.scrollTo({
+          top: chatBoxRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      }
+    return () => stopContinuousScrolling();
   }, [messages]);
 
-  // Clean up on unmount
-  useEffect(() => {
-    return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
-      if (scrollIntervalRef.current) {
-        clearInterval(scrollIntervalRef.current);
-      }
-    };
-  }, []);
 
-  const handleSend = async () => {
-    const message = input.trim();
+  const handleSend = async (messageOverride) => {
+    const message = typeof messageOverride === 'string' ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
     setIsLoading(true);
-    const newRequestCount = userRequestCount + 1;
-    setUserRequestCount(newRequestCount);
-
-    // Show user message + placeholder bot message
-    setMessages((prev) => [
-      ...prev,
-      { type: "user", text: message },
-      { type: "bot", text: "OmiBot is thinking...", loading: true },
-    ]);
+    
+    if (message !== "__GET_ONBOARDING__") {
+        setMessages((prev) => [...prev, { type: "user", text: message }]);
+    }
     setInput("");
 
-    // Resize input after sending
-    requestAnimationFrame(() => {
-      if (textareaRef.current) {
-        textareaRef.current.style.height = "auto";
-        textareaRef.current.style.height =
-          textareaRef.current.scrollHeight + "px";
+    setMessages((prev) => [...prev, { type: "bot", text: "OmiBot is thinking...", loading: true }]);
+    
+    scrollIntervalRef.current = setInterval(() => {
+      if (chatBoxRef.current) {
+        chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
       }
-    });
+    }, 100);
 
     try {
       const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
-        // --- THIS IS THE FIX ---
-        // This tells the browser to send the session cookie to your backend.
         credentials: "include",
       });
 
       if (!res.body) {
         const data = await res.json();
-        const finalAnswer = data.answer || "I don't know.";
-
+        const finalAnswer = data.answer || "I'm having a little trouble right now.";
         setMessages((prev) => {
-          const filtered = prev.filter(
-            (msg) => msg.text !== "OmiBot is thinking..."
-          );
-          return [...filtered, { type: "bot", text: finalAnswer, loading: false }];
+            const updated = prev.filter(msg => msg.text !== "OmiBot is thinking...");
+            return [...updated, { type: "bot", text: finalAnswer, loading: false, streaming: false }];
         });
-
-        // Newsletter prompt after 3rd request
-        if (newRequestCount === 3 && !emailSubmitted && !sessionDismissed) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              type: "bot",
-              text: `💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community.  
-
-And if you're a brand or creator, I've got a free detailed live shopping workbook I can send you too! What's your email? 🌱`,
-              loading: false,
-            },
-          ]);
-        }
-
-        setIsLoading(false);
         return;
       }
 
       const reader = res.body.getReader();
+      const decoder = new TextDecoder();
       let botMessage = "";
 
-      // Replace placeholder with empty bot message for streaming
-      setMessages((prev) => {
-        const withoutThinking = prev.filter(
-          (m) => m.text !== "OmiBot is thinking..."
-        );
-        return [
-          ...withoutThinking,
-          { type: "bot", text: "", loading: true, streaming: true },
-        ];
+      setMessages(prev => {
+          const updated = prev.filter(msg => msg.text !== "OmiBot is thinking...");
+          return [...updated, { type: "bot", text: "", loading: true, streaming: true }];
       });
-
-      startContinuousScrolling();
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = new TextDecoder("utf-8").decode(value);
-        botMessage += chunk;
-
-        try {
-          const jsonChunk = JSON.parse(botMessage);
-          if (jsonChunk.answer) botMessage = jsonChunk.answer;
-        } catch (e) {
-          // ignore partial JSON
-        }
+        botMessage += decoder.decode(value, { stream: true });
 
         setMessages((prev) => {
           const updated = [...prev];
           const lastIndex = updated.length - 1;
-          if (
-            lastIndex >= 0 &&
-            updated[lastIndex].type === "bot" &&
-            updated[lastIndex].streaming
-          ) {
-            updated[lastIndex] = {
-              ...updated[lastIndex],
-              text: botMessage,
-              loading: true,
-            };
+          if (lastIndex >= 0 && updated[lastIndex].type === "bot" && updated[lastIndex].streaming) {
+            updated[lastIndex] = { ...updated[lastIndex], text: botMessage, loading: true };
           }
           return updated;
         });
-
-        scrollToBottom();
       }
-
-      stopContinuousScrolling();
-      setMessages((prev) => {
-        const updated = [...prev];
-        const lastIndex = updated.length - 1;
-        if (
-          lastIndex >= 0 &&
-          updated[lastIndex].type === "bot" &&
-          updated[lastIndex].streaming
-        ) {
-          updated[lastIndex] = {
-            ...updated[lastIndex],
-            streaming: false,
-            loading: false,
-          };
-        }
-        return updated;
-      });
-
-      // Newsletter prompt after 3rd request (for streamed responses)
-      if (newRequestCount === 3 && !emailSubmitted && !sessionDismissed) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            type: "bot",
-            text: `💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community.  
-
-And if you're a brand or creator, I've got a free detailed live shopping workbook I can send you too! What's your email? 🌱`,
-            loading: false,
-          },
-        ]);
-      }
+      
     } catch (err) {
       console.error("Fetch error:", err);
       setMessages((prev) => {
-        const filtered = prev.filter(
-          (msg) => msg.text !== "OmiBot is thinking..."
-        );
-        return [
-          ...filtered,
-          { type: "bot", text: `⚠️ Error: ${err.message}`, loading: false },
-        ];
+        const updated = prev.filter(msg => msg.text !== "OmiBot is thinking...");
+        return [...updated, { type: "bot", text: `⚠️ Error: Could not connect to the server.`, loading: false, streaming: false }];
       });
-      stopContinuousScrolling();
     } finally {
+      stopContinuousScrolling();
+      setMessages((prev) => {
+          const updated = [...prev];
+          const lastIndex = updated.length - 1;
+          if (lastIndex >= 0 && updated[lastIndex].type === 'bot') {
+              updated[lastIndex].loading = false;
+              updated[lastIndex].streaming = false;
+          }
+          return updated;
+      });
       setIsLoading(false);
-      textareaRef.current?.focus();
     }
   };
 
@@ -277,7 +175,6 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
-        // Also adding here for consistency
         credentials: "include",
       });
       localStorage.setItem("userEmail", trimmed);
@@ -291,10 +188,7 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
           loading: false,
         },
       ]);
-
-      setTimeout(() => {
-        textareaRef.current?.focus();
-      }, 0);
+      
     } catch (err) {
       console.error("Failed to register email:", err);
     }
@@ -310,8 +204,10 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
         loading: false,
       },
     ]);
-    textareaRef.current?.focus();
   };
+  
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const showOnboardingButtons = lastMessage && lastMessage.type === 'bot' && lastMessage.text.includes("1. A Consumer");
 
   return (
     <div id="chat-popup">
@@ -322,7 +218,6 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
             className="new-chat-btn"
             onClick={() => {
               localStorage.removeItem("userEmail");
-              localStorage.removeItem("newsletterPrompted");
               window.location.reload();
             }}
           >
@@ -344,10 +239,8 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
               loading={msg.loading}
             />
           ))}
-          <div ref={endRef} />
         </div>
 
-        {/* Email input box */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) => m.text.includes("What's your email?")) && (
@@ -372,38 +265,45 @@ And if you're a brand or creator, I've got a free detailed live shopping workboo
             </div>
           )}
 
-        <div className="input-bar">
-          <textarea
-            ref={textareaRef}
-            rows="1"
-            placeholder={isLoading ? "OmiBot is thinking..." : "Ask me something..."}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !isLoading) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            disabled={isLoading}
-          />
-          <button
-            className="send-btn"
-            onClick={handleSend}
-            disabled={isLoading || !input.trim()}
-          >
-            <svg viewBox="0 0 24 24" width="22" height="22">
-              <path
-                d="M4 12h14M13 5l7 7-7 7"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        </div>
+        {showOnboardingButtons ? (
+          <div className="onboarding-buttons">
+            <button onClick={() => handleSend("Consumer")}>Consumer</button>
+            <button onClick={() => handleSend("Brand or Creator")}>Brand or Creator</button>
+          </div>
+        ) : (
+          <div className="input-bar">
+            <textarea
+              ref={textareaRef}
+              rows="1"
+              placeholder={isLoading ? "OmiBot is thinking..." : "Ask me something..."}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !isLoading) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              disabled={isLoading}
+            />
+            <button
+              className="send-btn"
+              onClick={() => handleSend()}
+              disabled={isLoading || !input.trim()}
+            >
+              <svg viewBox="0 0 24 24" width="22" height="22">
+                <path
+                  d="M4 12h14M13 5l7 7-7 7"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        )}
       </main>
     </div>
   );
