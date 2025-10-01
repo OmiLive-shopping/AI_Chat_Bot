@@ -151,10 +151,15 @@ def _clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", str(text).lower()).strip()
 
 AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start", "we can", "sure", "yup", "yep"}
+NEGATIONS = {"no", "nope", "no thanks", "i don't", "no i don't"}
 
 def is_affirmative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == a or cleaned.startswith(a + " ") for a in AFFIRMATIONS)
+
+def is_negative_response(text: str) -> bool:
+    cleaned = _clean_text(text)
+    return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
 
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
@@ -271,7 +276,8 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     key = _make_key(user_text)
     if not key: return []
     keys = df["brand_key"].tolist()
-    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.7)
+    # Stricter cutoff to avoid bad matches like tree -> reel
+    matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.8)
     if not matches:
         for b_key in keys:
             if key in b_key.split():
@@ -301,7 +307,7 @@ def start_quiz(session_data: dict) -> str:
     except Exception:
         return "I'm sorry, my quiz materials are missing at the moment."
     
-    session_data["current_quiz_session"] = {"quiz_data": quiz_data, "question_idx": 0, "quiz_type": quiz_type}
+    session_data["current_quiz_session"] = {"quiz_data": quiz_data, "question_idx": 0}
     return get_next_quiz_question(session_data)
 
 def get_next_quiz_question(session_data: dict) -> str:
@@ -311,35 +317,36 @@ def get_next_quiz_question(session_data: dict) -> str:
     if idx >= len(questions): return finish_quiz(session_data)
     q = questions[idx]
     options_text = "\n".join([f"{i+1}. {opt['text']}" for i, opt in enumerate(q["options"])])
-    return f"**Q{q['id']}**: {q['question']}\n{options_text}"
+    return f"**Question {q['id']}**: {q['question']}\n{options_text}"
 
 def answer_quiz_option(session_data: dict, option_num: int) -> str:
     quiz_session = session_data["current_quiz_session"]
     q = quiz_session["quiz_data"]["questions"][quiz_session["question_idx"]]
     if 1 <= option_num <= len(q["options"]):
-        session_data["quiz_answers"].append(q["options"][option_num-1]["type"])
+        # Save the answer letter ('A', 'B', etc.)
+        session_data["quiz_answers"].append(q["options"][option_num-1]["answer"])
         quiz_session["question_idx"] += 1
         return get_next_quiz_question(session_data)
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
+# --- FINAL, CORRECTED finish_quiz function ---
 def finish_quiz(session_data: dict) -> str:
     try:
-        result_type = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
-        quiz_type = session_data["current_quiz_session"]["quiz_type"]
+        quiz_data = session_data["current_quiz_session"]["quiz_data"]
         
-        prompt = (
-            f"{SYSTEM_PERSONA}\n\nA user has completed a {quiz_type} quiz. "
-            f"Their results indicate they have: **{result_type} {quiz_type}**. "
-            f"Please generate a simple, personalized, eco-friendly {quiz_type} care routine with 3-4 steps. "
-            f"For each step, recommend a *type* of product (e.g., 'a gentle hydrating cleanser' or 'a clarifying shampoo for oily scalps'). "
-            "Keep the descriptions brief and encouraging. Start the response with a friendly title."
-        )
+        # Determine the most common answer letter (A, B, C, or D)
+        most_common_answer = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
         
-        recommendation = get_llm().invoke(prompt).content
+        # Look up the result type (e.g., "Oily/Acne-Prone") from the results_logic
+        result_type = quiz_data["results_logic"][most_common_answer]
         
+        # Look up the pre-written routine from the routines object
+        routine = quiz_data["routines"][result_type]
+        
+        # Clean up session
         session_data.update({"current_quiz_session": None, "quiz_answers": []})
         
-        return f"Based on your answers, here is a routine for **{result_type} {quiz_type}**!\n\n{recommendation}"
+        return f"Based on your answers, it looks like you have **{result_type}**!\n\nHere’s a simple routine for you:\n{routine}"
     except Exception as e:
         print(f"[ERROR] in finish_quiz: {e}")
         traceback.print_exc()
@@ -355,11 +362,13 @@ def get_rag_response(question: str, user_id: str) -> str:
     if not raw_q: return "I don't know."
     
     is_affirmative = is_affirmative_response(raw_q)
+    is_negative = is_negative_response(raw_q)
 
+    # --- BLOCK A: Handle responses to the bot's direct questions ---
     if session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
             answer = answer_quiz_option(session_data, int(_clean_text(raw_q)))
-        else:
+        else: # Any non-digit response breaks out of the quiz
             session_data["current_quiz_session"] = None
         if session_data.get("current_quiz_session") is not None:
             _session_manager.update_session(user_id, session_data)
@@ -374,14 +383,16 @@ def get_rag_response(question: str, user_id: str) -> str:
     if session_data.get("waiting_for_rank_confirmation"):
         if is_affirmative:
             brand_to_rank = session_data.get("brand_to_rank")
-            session_data["waiting_for_rank_confirmation"] = False
-            session_data["brand_to_rank"] = None
+            session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
             _session_manager.update_session(user_id, session_data)
             if brand_to_rank:
                 return get_brand_ranking_single(brand_to_rank)
-            else:
-                return "I'm sorry, I seem to have forgotten which brand you asked about. Could you please tell me again?"
+        elif is_negative: # Handle "no" for brand ranking
+            session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
+            _session_manager.update_session(user_id, session_data)
+            return "Got it, no problem! How else can I help?"
 
+    # --- BLOCK B: Handle a new query from the user ---
     session_data.update({
         'waiting_for_quiz_start': False, 'quiz_type_pending': None,
         'waiting_for_rank_confirmation': False, 'brand_to_rank': None
@@ -422,7 +433,8 @@ def get_rag_response(question: str, user_id: str) -> str:
         else:
             return f"I couldn't find a brand ranking for '{brand_name_query}'."
 
-    if len(raw_q.split()) <= 4:
+    # Handle short queries that aren't affirmations/negations
+    if len(raw_q.split()) <= 4 and not is_affirmative and not is_negative:
         candidates = fuzzy_lookup_brand_candidates(raw_q)
         if len(candidates) == 1:
             brand_name = candidates[0]
@@ -434,6 +446,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif len(candidates) > 1:
             return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
+    # Fallback to general RAG for everything else
     context_docs = get_retriever().invoke(raw_q)
     context = "\n\n".join(d.page_content for d in context_docs)
     

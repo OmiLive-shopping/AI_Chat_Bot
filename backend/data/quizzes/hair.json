@@ -3,36 +3,45 @@
   "questions": [
     {
       "id": 1,
-      "question": "How often does your scalp get oily?",
+      "question": "How does your hair look when you wake up?",
       "options": [
-        {"text": "Daily or more", "type": "Oily"},
-        {"text": "Once every few days", "type": "Normal"},
-        {"text": "Rarely, scalp feels dry", "type": "Dry"},
-        {"text": "Oily at roots, dry at ends", "type": "Combination"},
-        {"text": "Itchy or sensitive scalp", "type": "Sensitive"}
+        {"text": "Pretty much the same as yesterday", "answer": "A"},
+        {"text": "Flat and needs volume boost", "answer": "B"},
+        {"text": "Tangled and needs serious detangling", "answer": "C"},
+        {"text": "Frizzy with some waves/curls showing", "answer": "D"}
       ]
     },
     {
       "id": 2,
-      "question": "How does your hair respond to sun exposure?",
+      "question": "How often do you wash your hair?",
       "options": [
-        {"text": "Gets dry, brittle quickly", "type": "Dry"},
-        {"text": "Fine sun damage, but manageable", "type": "Normal"},
-        {"text": "Oily and frizzy", "type": "Oily"},
-        {"text": "Dry ends but oily roots", "type": "Combination"},
-        {"text": "Scalp irritation or redness", "type": "Sensitive"}
+        {"text": "Every day or every other day", "answer": "A"},
+        {"text": "Every 2-3 days to avoid greasiness", "answer": "B"},
+        {"text": "1-2 times per week max", "answer": "C"},
+        {"text": "2-3 times per week", "answer": "D"}
       ]
     },
     {
       "id": 3,
-      "question": "How would you describe hair texture?",
+      "question": "How does your hair feel by day 2-3 after washing?",
       "options": [
-        {"text": "Smooth and soft", "type": "Normal"},
-        {"text": "Coarse or dry", "type": "Dry"},
-        {"text": "Greasy or limp", "type": "Oily"},
-        {"text": "Mixed textures", "type": "Combination"},
-        {"text": "Fragile, breaks easily", "type": "Sensitive"}
+        {"text": "Starts getting oily at the roots", "answer": "A"},
+        {"text": "Gets limp and greasy quickly", "answer": "B"},
+        {"text": "Still feels dry, could go longer", "answer": "C"},
+        {"text": "Gets frizzy but not necessarily oily", "answer": "D"}
       ]
     }
-  ]
+  ],
+  "results_logic": {
+    "A": "Straight/Normal Hair",
+    "B": "Straight/Fine Hair",
+    "C": "Thick/Coarse Hair",
+    "D": "Curly/Wavy Hair"
+  },
+  "routines": {
+    "Curly/Wavy Hair": "• Use sulfate-free shampoos and deep condition weekly.\n• Apply leave-in conditioner on damp hair, scrunch gently.\n• Sleep on silk/satin pillowcases to reduce frizz.\n• Try the \"plopping\" method for defined curls.",
+    "Straight/Fine Hair": "• Use lightweight, volumizing products at roots only.\n• Dry shampoo between washes to maintain body.\n• Avoid heavy oils - opt for hair mists instead.\n• Brush from ends up to prevent breakage.",
+    "Thick/Coarse Hair": "• Use rich, moisturizing masks 1-2x weekly.\n• Apply oils to mid-lengths and ends when damp.\n• Use wide-tooth combs to detangle gently.\n• Consider protective styles to reduce daily manipulation.",
+    "Straight/Normal Hair": "• Use lightweight, volumizing products.\n• Dry shampoo can extend time between washes and add body.\n• Avoid heavy oils that can weigh hair down.\n• Brush from ends up to prevent breakage."
+  }
 }

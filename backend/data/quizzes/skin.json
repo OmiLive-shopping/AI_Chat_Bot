@@ -3,36 +3,55 @@
   "questions": [
     {
       "id": 1,
-      "question": "How does your skin usually feel a few hours after washing?",
+      "question": "How does your skin feel 2-3 hours after cleansing (no products)?",
       "options": [
-        {"text": "Oily all over", "type": "Oily"},
-        {"text": "Tight or flaky", "type": "Dry"},
-        {"text": "Normal, balanced", "type": "Normal"},
-        {"text": "Oily in T-zone, dry elsewhere", "type": "Combination"},
-        {"text": "Red, sensitive, or irritated easily", "type": "Sensitive"}
+        {"text": "Oily all over, especially T-zone", "answer": "A"},
+        {"text": "Tight, dry, maybe flaky", "answer": "B"},
+        {"text": "Oily T-zone, normal/dry cheeks", "answer": "C"},
+        {"text": "Generally comfortable but showing fine lines", "answer": "D"}
       ]
     },
     {
       "id": 2,
-      "question": "How often do you experience breakouts?",
+      "question": "How does your skin react to new products?",
       "options": [
-        {"text": "Frequently", "type": "Oily"},
-        {"text": "Rarely", "type": "Normal"},
-        {"text": "Occasionally in T-zone", "type": "Combination"},
-        {"text": "Almost never", "type": "Dry"},
-        {"text": "Breakouts with irritation", "type": "Sensitive"}
+        {"text": "Usually fine, sometimes breaks out", "answer": "A"},
+        {"text": "Often gets red, stings, or irritated", "answer": "B"},
+        {"text": "T-zone might break out, cheeks stay calm", "answer": "C"},
+        {"text": "Takes longer to see results, focuses on anti-aging", "answer": "D"}
       ]
     },
     {
       "id": 3,
-      "question": "How would you describe the sensitivity of your skin?",
+      "question": "What's your main skin concern?",
       "options": [
-        {"text": "Not sensitive at all", "type": "Normal"},
-        {"text": "Sometimes itchy or red", "type": "Combination"},
-        {"text": "Easily irritated or reactive", "type": "Sensitive"},
-        {"text": "Rarely reacts", "type": "Oily"},
-        {"text": "Dry patches appear easily", "type": "Dry"}
+        {"text": "Shine, large pores, occasional breakouts", "answer": "A"},
+        {"text": "Dryness, sensitivity, redness", "answer": "B"},
+        {"text": "Different issues in different face zones", "answer": "C"},
+        {"text": "Fine lines, firmness, uneven tone", "answer": "D"}
+      ]
+    },
+    {
+      "id": 4,
+      "question": "How does your skin look without makeup?",
+      "options": [
+        {"text": "Shiny, especially nose and forehead", "answer": "A"},
+        {"text": "Dull, sometimes flaky or tight", "answer": "B"},
+        {"text": "Mixed - some areas shiny, others normal", "answer": "C"},
+        {"text": "Shows signs of aging but generally even", "answer": "D"}
       ]
     }
-  ]
+  ],
+  "results_logic": {
+    "A": "Oily/Acne-Prone",
+    "B": "Dry/Sensitive",
+    "C": "Combination Skin",
+    "D": "Mature/Aging Skin"
+  },
+  "routines": {
+    "Oily/Acne-Prone": "• Gentle cleanser 2x daily (avoid over-cleansing!).\n• Use niacinamide serums to control oil production.\n• Non-comedogenic moisturizers are your friend.\n• Clay masks 1-2x weekly for deep cleansing.",
+    "Dry/Sensitive": "• Cream-based cleansers and rich moisturizers.\n• Hyaluronic acid serums for hydration boost.\n• Avoid fragrances and harsh actives.\n• Use facial oils as the last step in your routine.",
+    "Combination Skin": "• Multi-zone approach: lighter products on T-zone.\n• BHA for oily areas, gentle hydration for dry zones.\n• Use different masks on different face areas.\n• Gentle exfoliation 2x weekly.",
+    "Mature/Aging Skin": "• Retinol products (start slow, build tolerance).\n• Vitamin C serums for antioxidant protection.\n• Rich, peptide-infused moisturizers.\n• Never skip SPF - it's your best anti-aging tool!"
+  }
 }
