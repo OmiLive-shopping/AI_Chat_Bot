@@ -256,6 +256,7 @@ def get_brand_ranking_single(brand_name: str) -> str:
         response += "\n\n" + "\n".join(breakdown)
     return response
 
+# --- UPDATED: respond_rank_all_brands function ---
 def respond_rank_all_brands() -> str:
     df = get_brand_df()
     if df.empty or 'final_score' not in df.columns:
@@ -265,9 +266,14 @@ def respond_rank_all_brands() -> str:
     response_lines = ["Of course! Here are the brands ranked by their final sustainability score, from highest to lowest:\n"]
     for i, row in enumerate(ranked_df.itertuples(), 1):
         response_lines.append(f"{i}. **{row.brand_name}** ({row.final_score})")
-        
+    
     response_lines.append(f"\n* {ranked_df.iloc[0]['brand_name']} has the highest score in this list with {ranked_df.iloc[0]['final_score']} out of 30!")
     response_lines.append("* This ranking is based on the \"Final Score\" which considers things like recycled materials, worker welfare, and local sourcing.")
+    
+    # Also append the full list of other brands
+    all_brands = sorted(df["brand_name"].dropna().unique())
+    response_lines.append("\nI also track the following brands: " + ", ".join(all_brands))
+    
     return "\n".join(response_lines)
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
@@ -323,13 +329,11 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
     quiz_session = session_data["current_quiz_session"]
     q = quiz_session["quiz_data"]["questions"][quiz_session["question_idx"]]
     if 1 <= option_num <= len(q["options"]):
-        # Save the answer letter ('A', 'B', etc.)
         session_data["quiz_answers"].append(q["options"][option_num-1]["answer"])
         quiz_session["question_idx"] += 1
         return get_next_quiz_question(session_data)
     return f"Invalid choice. Please select a number from 1 to {len(q['options'])}."
 
-# --- FINAL, CORRECTED finish_quiz function ---
 def finish_quiz(session_data: dict) -> str:
     try:
         quiz_data = session_data["current_quiz_session"]["quiz_data"]
@@ -343,7 +347,6 @@ def finish_quiz(session_data: dict) -> str:
         # Look up the pre-written routine from the routines object
         routine = quiz_data["routines"][result_type]
         
-        # Clean up session
         session_data.update({"current_quiz_session": None, "quiz_answers": []})
         
         return f"Based on your answers, it looks like you have **{result_type}**!\n\nHere’s a simple routine for you:\n{routine}"
@@ -364,11 +367,10 @@ def get_rag_response(question: str, user_id: str) -> str:
     is_affirmative = is_affirmative_response(raw_q)
     is_negative = is_negative_response(raw_q)
 
-    # --- BLOCK A: Handle responses to the bot's direct questions ---
     if session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
             answer = answer_quiz_option(session_data, int(_clean_text(raw_q)))
-        else: # Any non-digit response breaks out of the quiz
+        else:
             session_data["current_quiz_session"] = None
         if session_data.get("current_quiz_session") is not None:
             _session_manager.update_session(user_id, session_data)
@@ -387,12 +389,11 @@ def get_rag_response(question: str, user_id: str) -> str:
             _session_manager.update_session(user_id, session_data)
             if brand_to_rank:
                 return get_brand_ranking_single(brand_to_rank)
-        elif is_negative: # Handle "no" for brand ranking
+        elif is_negative:
             session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
             _session_manager.update_session(user_id, session_data)
             return "Got it, no problem! How else can I help?"
 
-    # --- BLOCK B: Handle a new query from the user ---
     session_data.update({
         'waiting_for_quiz_start': False, 'quiz_type_pending': None,
         'waiting_for_rank_confirmation': False, 'brand_to_rank': None
@@ -433,7 +434,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         else:
             return f"I couldn't find a brand ranking for '{brand_name_query}'."
 
-    # Handle short queries that aren't affirmations/negations
     if len(raw_q.split()) <= 4 and not is_affirmative and not is_negative:
         candidates = fuzzy_lookup_brand_candidates(raw_q)
         if len(candidates) == 1:
@@ -446,7 +446,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif len(candidates) > 1:
             return "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
-    # Fallback to general RAG for everything else
     context_docs = get_retriever().invoke(raw_q)
     context = "\n\n".join(d.page_content for d in context_docs)
     
