@@ -26,6 +26,9 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 # Copy application code and assets
 # --------------------------
 COPY . .
+# --- THIS IS THE FIX ---
+# Explicitly copy the data directory and all its contents (including the workbook)
+COPY data/ ./data/
 
 # --------------------------
 # Create non-root user and set permissions
@@ -42,11 +45,6 @@ ENV OMP_NUM_THREADS=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 ENV FLASK_ENV=production
-
-# --------------------------
-# Optional: build FAISS index inside container
-# Uncomment if you want to build during image creation
-# RUN python build_faiss.py
 
 # --------------------------
 # Expose port
