@@ -150,7 +150,7 @@ def get_user_id(session_info: Any) -> str:
 def _clean_text(text: str) -> str:
     return re.sub(r"[^a-z0-9\s]", "", str(text).lower()).strip()
 
-AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start", "we can", "sure", "yup", "yep"}
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start", "we can", "sure", "yup", "yep", "of course", "ofcourse"}
 NEGATIONS = {"no", "nope", "no thanks", "i don't", "no i don't"}
 
 def is_affirmative_response(text: str) -> bool:
@@ -160,18 +160,6 @@ def is_affirmative_response(text: str) -> bool:
 def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
-
-def detect_routine_intent(question: str) -> Optional[str]:
-    cleaned_q = _clean_text(question)
-    hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare', 'hair care']
-    skin_keywords = ['skin', 'face', 'acne', 'wrinkle', 'dry skin', 'oily skin', 'routine', 'regimen', 'skincare', 'skin care']
-    has_hair = any(word in cleaned_q for word in hair_keywords)
-    has_skin = any(word in cleaned_q for word in skin_keywords)
-    if has_skin and not has_hair: return 'skin'
-    if has_hair and not has_skin: return 'hair'
-    if 'skin' in cleaned_q and 'quiz' in cleaned_q: return 'skin'
-    if 'hair' in cleaned_q and 'quiz' in cleaned_q: return 'hair'
-    return None
 
 def _make_key(text: str) -> str:
     s = str(text).lower()
@@ -183,13 +171,17 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
-SMALL_TALK = ("how are you", "how are you doing", "whats up")
 
 def get_llm() -> ChatVertexAI:
     global _llm
     if _llm: return _llm
     _llm = ChatVertexAI(model_name="gemini-2.5-pro", temperature=0.5, max_output_tokens=1536)
     return _llm
+    
+def get_classifier_llm() -> ChatVertexAI:
+    # Use a faster, cheaper model for simple classification
+    return ChatVertexAI(model_name="gemini-1.5-flash-001", temperature=0.0, max_output_tokens=50)
+
 
 def get_retriever():
     global _retriever
@@ -211,8 +203,37 @@ def preload_faiss_index():
     get_brand_df()
     print("[INFO] FAISS index and brand data are ready.")
 
+# --- NEW: AI-Powered Semantic Intent Classification ---
+def classify_intent(question: str) -> str:
+    """Uses an LLM to classify the user's intent."""
+    classifier = get_classifier_llm()
+    prompt = f"""
+    Classify the user's intent based on their message. Respond with ONLY one of the following labels:
+    - QUIZ_REQUEST: The user is asking for a personalized routine, a quiz, or help with their skin/hair.
+    - RANK_BRANDS: The user is asking to see the ranked list of top brands.
+    - LIST_BRANDS: The user is asking to see all the brands that are tracked.
+    - SMALL_TALK: The user is making a greeting or asking a conversational question like "how are you?".
+    - GENERAL_QUESTION: The user is asking any other question about products, brands, sustainability, etc.
+
+    User Message: "{question}"
+    Classification:
+    """
+    try:
+        response = classifier.invoke(prompt)
+        intent = response.content.strip()
+        # Ensure the response is one of the valid labels
+        valid_intents = ["QUIZ_REQUEST", "RANK_BRANDS", "LIST_BRANDS", "SMALL_TALK", "GENERAL_QUESTION"]
+        if intent in valid_intents:
+            return intent
+    except Exception as e:
+        print(f"[ERROR] Intent classification failed: {e}")
+    
+    # Default to general question if classification fails or is invalid
+    return "GENERAL_QUESTION"
+
+
 # =========================
-# Brand Logic
+# Brand Logic (No Changes)
 # =========================
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
@@ -251,7 +272,6 @@ def get_brand_ranking_single(brand_name: str) -> str:
     breakdown_cols = [ "recycled/upcycled_materials", "end_of_life_solutions_(compostable_packaging/zero_waste)", "worker_welfare/living_wage", "local_sourcing", "sustainability_data_accessibility", "marketing_honesty/_certifications" ]
     breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
 
-    # --- UPDATED: Switched from \n\n to \n for tighter spacing ---
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
     if breakdown:
         response += "\n" + "\n".join(breakdown)
@@ -280,7 +300,7 @@ def respond_list_all_brands() -> str:
     if df.empty:
         return "I don't have brand information right now."
     brands = sorted(df["brand_name"].dropna().unique())
-    return "Here are all the brands I track:\n\n" + ", ".join(brands)
+    return "Here are all the brands I track:\n" + ", ".join(brands)
 
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
@@ -300,7 +320,7 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
-# Quiz Logic
+# Quiz Logic (No changes)
 # =========================
 def offer_quiz(session_data: dict, quiz_type: str) -> str:
     session_data["waiting_for_quiz_start"] = True
@@ -343,15 +363,10 @@ def answer_quiz_option(session_data: dict, option_num: int) -> str:
 def finish_quiz(session_data: dict) -> str:
     try:
         quiz_data = session_data["current_quiz_session"]["quiz_data"]
-        
         most_common_answer = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
-        
         result_type = quiz_data["results_logic"][most_common_answer]
-        
         routine = quiz_data["routines"][result_type]
-        
         session_data.update({"current_quiz_session": None, "quiz_answers": []})
-        
         return f"Based on your answers, it looks like you have **{result_type}**!\n\nHere’s a simple routine for you:\n{routine}"
     except Exception as e:
         print(f"[ERROR] in finish_quiz: {e}")
@@ -360,24 +375,20 @@ def finish_quiz(session_data: dict) -> str:
         return "I had a little trouble generating your routine. Please try asking for the quiz again!"
 
 # =========================
-# Main Response Generator
+# Main Response Generator (Rewritten with Semantic Intent)
 # =========================
 def get_rag_response(question: str, user_id: str) -> str:
     session_data = _session_manager.get_session(user_id)
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
 
-    # This is now the single exit point for all responses
     answer = ""
-    
-    # Increment response count early, but handle init case
-    if raw_q != "__GET_ONBOARDING__":
-        session_data['response_count'] = session_data.get('response_count', 0) + 1
+    session_data['response_count'] = session_data.get('response_count', 0) + 1
 
     is_affirmative = is_affirmative_response(raw_q)
     is_negative = is_negative_response(raw_q)
 
-    # --- BLOCK A: Handle special triggers and stateful responses ---
+    # --- BLOCK A: Handle stateful responses FIRST ---
     if raw_q == "__GET_ONBOARDING__":
         session_data['waiting_for_user_classification'] = True
         answer = "To personalize your experience, please let me know who you are."
@@ -406,15 +417,12 @@ def get_rag_response(question: str, user_id: str) -> str:
     elif session_data.get("waiting_for_quiz_start"):
         if is_affirmative:
             answer = start_quiz(session_data)
-        else: # Any other text cancels the quiz offer
-            session_data["waiting_for_quiz_start"] = False
-            # Fall through to treat as a new query
+        # If not affirmative, we'll let it fall through to be re-classified
             
     elif session_data.get("waiting_for_rank_confirmation"):
         if is_affirmative:
             brand_to_rank = session_data.get("brand_to_rank")
-            if brand_to_rank:
-                answer = get_brand_ranking_single(brand_to_rank)
+            if brand_to_rank: answer = get_brand_ranking_single(brand_to_rank)
         elif is_negative:
             answer = "Got it, no problem! How else can I help?"
         session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
@@ -431,58 +439,49 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "No problem! What else can I help you with today?"
         session_data['waiting_for_workbook_confirmation'] = False
 
-    # --- BLOCK B: Handle new queries if no stateful response was generated ---
+    # --- BLOCK B: Classify intent and handle new queries ---
     if not answer:
-        session_data.update({
-            'waiting_for_quiz_start': False, 'quiz_type_pending': None,
-            'waiting_for_rank_confirmation': False, 'brand_to_rank': None
-        })
-        
-        cleaned_q = _clean_text(raw_q)
-        
-        if cleaned_q in SMALL_TALK:
-            answer = "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
-        
-        elif "list" in cleaned_q and "brand" in cleaned_q:
-             answer = respond_list_all_brands()
+        intent = classify_intent(raw_q)
+        print(f"[INFO] Classified intent as: {intent}")
 
-        elif "rank" in cleaned_q and "brand" in cleaned_q:
+        if intent == 'QUIZ_REQUEST':
+            cleaned_q = _clean_text(raw_q)
+            if 'hair' in cleaned_q:
+                answer = offer_quiz(session_data, 'hair')
+            elif 'skin' in cleaned_q:
+                answer = offer_quiz(session_data, 'skin')
+            else: # If intent is quiz but topic is unclear, ask
+                answer = "Of course! Did you want the skin quiz or the hair quiz?"
+        
+        elif intent == 'RANK_BRANDS':
             answer = respond_rank_all_brands()
 
-        else:
-            routine_type = detect_routine_intent(raw_q)
-            if routine_type:
-                answer = offer_quiz(session_data, routine_type)
-            else:
-                rank_match = re.match(r"^\s*rank\s+(.*)", cleaned_q)
-                if rank_match:
-                    brand_name_query = rank_match.group(1).strip()
-                    candidates = fuzzy_lookup_brand_candidates(brand_name_query)
-                    if len(candidates) == 1:
-                        answer = get_brand_ranking_single(candidates[0])
-                    elif len(candidates) > 1:
-                        answer = f"I found a few brands that match '{brand_name_query}'. Which one did you mean?\n- " + "\n- ".join(candidates)
-                    else:
-                        answer = f"I couldn't find a brand ranking for '{brand_name_query}'."
-                
-                elif len(raw_q.split()) <= 4 and not is_affirmative and not is_negative:
-                    candidates = fuzzy_lookup_brand_candidates(raw_q)
-                    if len(candidates) == 1:
-                        brand_name = candidates[0]
-                        session_data["waiting_for_rank_confirmation"] = True
-                        session_data["brand_to_rank"] = brand_name
-                        answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
-                    elif len(candidates) > 1:
-                        answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+        elif intent == 'LIST_BRANDS':
+            answer = respond_list_all_brands()
 
-                if not answer: # Fallback to general RAG
-                    context_docs = get_retriever().invoke(raw_q)
-                    context = "\n\n".join(d.page_content for d in context_docs)
-                    if not context.strip():
-                        answer = "I don't know."
-                    else:
-                        prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-                        answer = get_llm().invoke(prompt).content
+        elif intent == 'SMALL_TALK':
+            answer = "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
+
+        elif intent == 'GENERAL_QUESTION':
+            # For general questions, first try a quick brand lookup
+            candidates = fuzzy_lookup_brand_candidates(raw_q)
+            if len(candidates) == 1:
+                brand_name = candidates[0]
+                session_data["waiting_for_rank_confirmation"] = True
+                session_data["brand_to_rank"] = brand_name
+                answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
+            elif len(candidates) > 1:
+                answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+
+            # If no quick match, fall back to the main RAG system
+            if not answer:
+                context_docs = get_retriever().invoke(raw_q)
+                context = "\n\n".join(d.page_content for d in context_docs)
+                if not context.strip():
+                    answer = "I'm not sure how to answer that. Could you try rephrasing?"
+                else:
+                    prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+                    answer = get_llm().invoke(prompt).content
     
     # --- Final Step: Append newsletter prompt if needed ---
     if session_data.get('response_count') == 3 and not session_data.get('email_prompted'):
@@ -503,7 +502,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         answer += newsletter_prompt
     
     _session_manager.update_session(user_id, session_data)
-    
     return answer
 
 # CLI test function
