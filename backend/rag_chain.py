@@ -256,7 +256,6 @@ def get_brand_ranking_single(brand_name: str) -> str:
         response += "\n\n" + "\n".join(breakdown)
     return response
 
-# --- UPDATED: respond_rank_all_brands function ---
 def respond_rank_all_brands() -> str:
     df = get_brand_df()
     if df.empty or 'final_score' not in df.columns:
@@ -266,11 +265,10 @@ def respond_rank_all_brands() -> str:
     response_lines = ["Of course! Here are the brands ranked by their final sustainability score, from highest to lowest:\n"]
     for i, row in enumerate(ranked_df.itertuples(), 1):
         response_lines.append(f"{i}. **{row.brand_name}** ({row.final_score})")
-    
+        
     response_lines.append(f"\n* {ranked_df.iloc[0]['brand_name']} has the highest score in this list with {ranked_df.iloc[0]['final_score']} out of 30!")
     response_lines.append("* This ranking is based on the \"Final Score\" which considers things like recycled materials, worker welfare, and local sourcing.")
     
-    # Also append the full list of other brands
     all_brands = sorted(df["brand_name"].dropna().unique())
     response_lines.append("\nI also track the following brands: " + ", ".join(all_brands))
     
@@ -282,7 +280,6 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     key = _make_key(user_text)
     if not key: return []
     keys = df["brand_key"].tolist()
-    # Stricter cutoff to avoid bad matches like tree -> reel
     matches = difflib.get_close_matches(key, keys, n=3, cutoff=0.8)
     if not matches:
         for b_key in keys:
@@ -338,13 +335,10 @@ def finish_quiz(session_data: dict) -> str:
     try:
         quiz_data = session_data["current_quiz_session"]["quiz_data"]
         
-        # Determine the most common answer letter (A, B, C, or D)
         most_common_answer = Counter(session_data["quiz_answers"]).most_common(1)[0][0]
         
-        # Look up the result type (e.g., "Oily/Acne-Prone") from the results_logic
         result_type = quiz_data["results_logic"][most_common_answer]
         
-        # Look up the pre-written routine from the routines object
         routine = quiz_data["routines"][result_type]
         
         session_data.update({"current_quiz_session": None, "quiz_answers": []})
@@ -372,9 +366,10 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = answer_quiz_option(session_data, int(_clean_text(raw_q)))
         else:
             session_data["current_quiz_session"] = None
-        if session_data.get("current_quiz_session") is not None:
-            _session_manager.update_session(user_id, session_data)
-            return answer
+            answer = "Quiz cancelled. How can I help?"
+        
+        _session_manager.update_session(user_id, session_data)
+        return answer
 
     if session_data.get("waiting_for_quiz_start"):
         if is_affirmative:
@@ -449,6 +444,9 @@ def get_rag_response(question: str, user_id: str) -> str:
     context_docs = get_retriever().invoke(raw_q)
     context = "\n\n".join(d.page_content for d in context_docs)
     
+    if not context.strip():
+        return "I don't know."
+
     prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
     answer = get_llm().invoke(prompt).content
     
