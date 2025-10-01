@@ -184,8 +184,6 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
-GREETINGS = ("hi", "hello", "hey")
-# --- NEW: Small Talk Handler ---
 SMALL_TALK = ("how are you", "how are you doing", "whats up")
 
 def get_llm() -> ChatVertexAI:
@@ -360,13 +358,12 @@ def get_rag_response(question: str, user_id: str) -> str:
     session_data = _session_manager.get_session(user_id)
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
-    
+
     if raw_q == "__GET_ONBOARDING__":
         session_data['response_count'] = session_data.get('response_count', 0) + 1
         session_data['waiting_for_user_classification'] = True
         _session_manager.update_session(user_id, session_data)
-        return ("To personalize your experience, please let me know who you are:\n\n"
-                "1. A Consumer\n2. A Brand or Creator")
+        return "To personalize your experience, please let me know who you are."
 
     session_data['response_count'] = session_data.get('response_count', 0) + 1
     answer = ""
@@ -390,7 +387,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         
         else: 
             session_data['waiting_for_user_classification'] = True 
-            answer = "Please choose a valid option. Are you a Consumer (1) or a Brand/Creator (2)?"
+            answer = "Please choose a valid option by clicking one of the buttons below."
         
         _session_manager.update_session(user_id, session_data)
         return answer
@@ -440,7 +437,6 @@ def get_rag_response(question: str, user_id: str) -> str:
     
     cleaned_q = _clean_text(raw_q)
     
-    # --- NEW: Handle Small Talk ---
     if cleaned_q in SMALL_TALK:
         _session_manager.update_session(user_id, session_data)
         return "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
@@ -486,7 +482,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
         answer = get_llm().invoke(prompt).content
     
-    if session_data.get('response_count') == 4 and not session_data.get('email_prompted'): # Adjusted count for new flow
+    if session_data.get('response_count') == 3 and not session_data.get('email_prompted'):
         session_data['email_prompted'] = True
         user_type = session_data.get('user_type')
         
