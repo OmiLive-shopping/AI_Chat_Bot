@@ -61,7 +61,8 @@ DATA_DIR = os.environ.get('DATA_DIR', 'data')
 FAQ_PATH = os.path.join(DATA_DIR, "omi_faq.txt")
 KB_PATH = os.path.join(DATA_DIR, "omilive_knowledge_base.txt")
 BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
-WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.doc"
+# --- UPDATED: Corrected workbook filename extension ---
+WORKBOOK_FILENAME = "Omi_Live_-_Live_Sales_Tactical_Workbook.docx"
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 
 QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
@@ -124,12 +125,12 @@ class UserSessionManager:
 
     def _get_default_session(self, user_id: str) -> dict:
         return {
-            "user_id": user_id, "interaction_count": 0, "email": None,
-            "last_prompted_at": None, "response_count": 0, "greeting_index": 0,
-            "waiting_for_workbook_confirmation": False, "current_quiz_session": None,
+            "user_id": user_id, "response_count": 0, "current_quiz_session": None,
             "quiz_answers": [], "waiting_for_quiz_start": False,
-            "waiting_for_brand_list": False, "shown_brand_list": False,
             "waiting_for_rank_confirmation": False, "brand_to_rank": None,
+            "waiting_for_workbook_confirmation": False,
+            # --- NEW: State for onboarding ---
+            "waiting_for_user_classification": False,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -183,7 +184,6 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
-GREETINGS = ("hi", "hello", "hey")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -358,8 +358,30 @@ def get_rag_response(question: str, user_id: str) -> str:
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
     
+    session_data['response_count'] = session_data.get('response_count', 0) + 1
+    
     is_affirmative = is_affirmative_response(raw_q)
     is_negative = is_negative_response(raw_q)
+
+    # --- BLOCK A: Handle responses to the bot's direct questions ---
+    
+    # --- NEW: Handle user classification onboarding ---
+    if session_data.get("waiting_for_user_classification"):
+        cleaned_q = _clean_text(raw_q)
+        session_data['waiting_for_user_classification'] = False # Consume this state
+        
+        if cleaned_q == '1' or 'consumer' in cleaned_q:
+            _session_manager.update_session(user_id, session_data)
+            return "Great! As a consumer, you can ask me about our green rating system, get personalized skincare or haircare routines, and discover sustainable brands. What are you curious about first? You can also ask to join our beta!"
+        
+        elif cleaned_q == '2' or 'brand' in cleaned_q or 'creator' in cleaned_q:
+            session_data['waiting_for_workbook_confirmation'] = True
+            _session_manager.update_session(user_id, session_data)
+            return "Welcome! For brands and creators, I can offer our *Omi Live Tactical Workbook* to guide your sustainability journey. Would you like me to send it to you?"
+        
+        else: # Invalid option
+            _session_manager.update_session(user_id, session_data)
+            return "Please choose a valid option. Are you a Consumer (1) or a Brand/Creator (2)?"
 
     if session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
@@ -367,7 +389,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         else:
             session_data["current_quiz_session"] = None
             answer = "Quiz cancelled. How can I help?"
-        
         _session_manager.update_session(user_id, session_data)
         return answer
 
@@ -388,7 +409,19 @@ def get_rag_response(question: str, user_id: str) -> str:
             session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
             _session_manager.update_session(user_id, session_data)
             return "Got it, no problem! How else can I help?"
+            
+    if session_data.get("waiting_for_workbook_confirmation"):
+        if is_affirmative:
+            session_data['waiting_for_workbook_confirmation'] = False
+            _session_manager.update_session(user_id, session_data)
+            return "Excellent! You can download the workbook here: [Download Workbook](/get_workbook)"
+        elif is_negative:
+            session_data['waiting_for_workbook_confirmation'] = False
+            _session_manager.update_session(user_id, session_data)
+            return "No problem! What else can I help you with today?"
 
+
+    # --- BLOCK B: Handle a new query from the user ---
     session_data.update({
         'waiting_for_quiz_start': False, 'quiz_type_pending': None,
         'waiting_for_rank_confirmation': False, 'brand_to_rank': None
@@ -396,18 +429,11 @@ def get_rag_response(question: str, user_id: str) -> str:
     
     cleaned_q = _clean_text(raw_q)
     
-    if cleaned_q in GREETINGS:
-        greeting = "Hi there! I'm OMI, your friendly guide to sustainable shopping. I'm happy to help you make a big difference, one small choice at a time."
-        if not session_data.get('shown_brand_list'):
-            df = get_brand_df()
-            if not df.empty:
-                brands = sorted(df["brand_name"].dropna().unique())
-                brands_text = ", ".join(brands)
-                greeting += f"\n\nTo get you started, here are some of the brands I track:\n{brands_text}"
-                session_data['shown_brand_list'] = True
-        
+    # --- NEW: Trigger onboarding on first message ---
+    if session_data.get('response_count', 0) == 1:
+        session_data['waiting_for_user_classification'] = True
         _session_manager.update_session(user_id, session_data)
-        return greeting
+        return "Welcome to Omi! To personalize your experience, please let me know who you are:\n\n1. A Consumer\n2. A Brand or Creator"
     
     routine_type = detect_routine_intent(raw_q)
     if routine_type:
@@ -450,7 +476,6 @@ def get_rag_response(question: str, user_id: str) -> str:
     prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
     answer = get_llm().invoke(prompt).content
     
-    session_data['response_count'] = session_data.get('response_count', 0) + 1
     _session_manager.update_session(user_id, session_data)
     
     return answer
