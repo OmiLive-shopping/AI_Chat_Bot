@@ -87,13 +87,13 @@ Direct answer:"""
 
 # Proactive Follow-up Suggestions
 PROACTIVE_SUGGESTIONS = [
-    "Next, we could talk about eco-friendly laundry swaps.",
-    "Did you know that bees are responsible for pollinating 75% of the world's crops?",
-    "Would you like to see how to choose a sunscreen that doesn't harm coral reefs?",
-    "Curious about the health benefits of bamboo?",
-    "I can also share some tips for eating more sustainably.",
-    "Want to learn about the hidden dangers in conventional tampons?",
-    "We could also explore some superfood drinks for glowing skin."
+    "You can also ask me about eco-friendly laundry swaps.",
+    "You can also ask me: 'Why are bees important?'",
+    "You can also ask me: 'How do I choose a reef-safe sunscreen?'",
+    "You can also ask me about the health benefits of bamboo.",
+    "You can also ask me for tips on eating more sustainably.",
+    "You can also ask me: 'What are the dangers in conventional tampons?'",
+    "You can also ask me about superfood drinks for glowing skin."
 ]
 
 # =========================
@@ -261,6 +261,7 @@ def get_brand_ranking_single(brand_name: str) -> str:
     return response
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
+    if _clean_text(user_text) in NEGATIONS: return []
     df = get_brand_df()
     if df.empty: return []
     key = _clean_text(user_text)
@@ -385,7 +386,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         add_suggestion = False
     
     elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q):
-        # This handles email submission from ANY prompt
         session_data['waiting_for_email'] = False
         user_type = session_data.get('user_type')
         if user_type == 'brand_owner':
@@ -406,11 +406,10 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     elif session_data.get("waiting_for_quiz_start"):
         if is_affirmative:
-            quiz_type = session_data.get('quiz_type_pending', 'skin') # Default to skin if somehow lost
+            quiz_type = session_data.get('quiz_type_pending', 'skin')
             answer = start_quiz(session_data, quiz_type)
         else:
             session_data["waiting_for_quiz_start"] = False
-            # Fall through to treat as a new query
         add_suggestion = False
 
     elif session_data.get("waiting_for_workbook_confirmation"):
@@ -424,24 +423,55 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "No problem! What else can I help you with today?"
         session_data['waiting_for_workbook_confirmation'] = False
         add_suggestion = False
+        
+    elif session_data.get("waiting_for_rank_confirmation"):
+        if is_affirmative:
+            brand_to_rank = session_data.get("brand_to_rank")
+            if brand_to_rank: answer = get_brand_ranking_single(brand_to_rank)
+        elif is_negative:
+            answer = "Got it, no problem! How else can I help?"
+        session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
+        add_suggestion = False
+        
+    elif is_negative_response(raw_q) and session_data.get('waiting_for_email'):
+        session_data['email_prompt_denied'] = True
+        session_data['waiting_for_email'] = False
+        answer = "👍 No worries! We'll keep chatting here."
+        add_suggestion = False
 
     # --- BLOCK B: If no stateful response, handle new query ---
     if not answer:
         add_suggestion = True
-        retriever = get_retriever()
-        if not retriever:
-            answer = "My knowledge base is currently unavailable. Please try again later."
+        
+        session_data.update({
+            'waiting_for_quiz_start': False, 
+            'quiz_type_pending': None,
+            'waiting_for_rank_confirmation': False, 
+            'brand_to_rank': None
+        })
+        
+        cleaned_q = _clean_text(raw_q)
+        
+        quiz_type = detect_routine_intent(raw_q)
+        if quiz_type:
+            answer = offer_quiz(session_data, quiz_type)
+            session_data['quiz_type_pending'] = quiz_type
         else:
-            quiz_type = detect_routine_intent(raw_q)
-            if quiz_type:
-                answer = offer_quiz(session_data)
-                session_data['quiz_type_pending'] = quiz_type
-            else:
-                candidates = fuzzy_lookup_brand_candidates(raw_q)
-                if len(candidates) == 1:
-                    answer = get_brand_ranking_single(candidates[0])
-                elif len(candidates) > 1:
-                    answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+            candidates = fuzzy_lookup_brand_candidates(raw_q)
+            if len(candidates) == 1:
+                brand_name = candidates[0]
+                session_data["waiting_for_rank_confirmation"] = True
+                session_data["brand_to_rank"] = brand_name
+                answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
+                add_suggestion = False
+            elif len(candidates) > 1:
+                answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+                add_suggestion = False
+
+            if not answer: # Fallback to general RAG
+                retriever = get_retriever()
+                if not retriever:
+                    answer = "My knowledge base is currently unavailable. Please try again later."
                 else:
                     context_docs = retriever.invoke(raw_q)
                     context = "\n\n".join(d.page_content for d in context_docs)
@@ -450,29 +480,25 @@ def get_rag_response(question: str, user_id: str) -> str:
                     else:
                         prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
                         answer = get_llm().invoke(prompt).content
-
+    
     # --- Final Step: Append newsletter or suggestion ---
     should_prompt_email = False
     user_type = session_data.get('user_type')
     response_count = session_data.get('response_count', 0)
     
-    # Rule for Eco Shoppers
-    if user_type == 'eco_shopper' and response_count == 3:
-        should_prompt_email = True
-        
-    # Fallback Rule for Brands/Creators who denied the workbook
-    if user_type in ['creator', 'brand_owner'] and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
-        should_prompt_email = True
+    if not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
+        if user_type == 'eco_shopper' and response_count == 3:
+            should_prompt_email = True
+        elif user_type in ['creator', 'brand_owner'] and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
+            should_prompt_email = True
 
-    if should_prompt_email and not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
+    if should_prompt_email:
         session_data['waiting_for_email'] = True
+        # The prompt is now universal, as the creator/brand specific one is handled contextually
         answer += ("\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                    "Drop your email and we’ll add you to our Omi Fam newsletter.")
         add_suggestion = False
-        if is_negative_response(raw_q): # Check if the user's *current* message is a denial
-            session_data['email_prompt_denied'] = True
-            session_data['waiting_for_email'] = False
-
+    
     if add_suggestion:
         answer += get_follow_up_suggestion(session_data)
 
