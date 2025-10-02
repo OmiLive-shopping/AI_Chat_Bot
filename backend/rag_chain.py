@@ -85,7 +85,7 @@ Question: {question}
 Direct answer:"""
 )
 
-# --- NEW: Proactive Follow-up Suggestions ---
+# Proactive Follow-up Suggestions
 PROACTIVE_SUGGESTIONS = [
     "Next, we could talk about eco-friendly laundry swaps.",
     "Did you know that bees are responsible for pollinating 75% of the world's crops?",
@@ -138,6 +138,7 @@ class UserSessionManager:
             "waiting_for_workbook_confirmation": False,
             "waiting_for_user_classification": False, "user_type": None,
             "waiting_for_email": False, "offered_suggestions": [],
+            "email_prompt_denied": False,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -174,11 +175,10 @@ def is_affirmative_response(text: str) -> bool:
 def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
-    
-# --- THIS FUNCTION WAS ADDED BACK ---
+
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
-    quiz_trigger_keywords = ['routine', 'regimen', 'help me with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care']
+    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care']
     if 'quiz' in cleaned_q or any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
         hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
         skin_keywords = ['skin', 'face', 'acne', 'wrinkle']
@@ -278,9 +278,10 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
 # =========================
 # Quiz Logic
 # =========================
-def offer_quiz(session_data: dict) -> str:
+def offer_quiz(session_data: dict, quiz_type: str) -> str:
     session_data["waiting_for_quiz_start"] = True
-    return "Want to personalize your experience? Take our quick quiz to identify your hair & skin types so we can recommend the best products."
+    session_data["quiz_type_pending"] = quiz_type
+    return "Want to personalize your experience? Take our quick quiz to identify your hair & skin types so we can recommend the best products. Shall we start?"
 
 def start_quiz(session_data: dict, quiz_type: str) -> str:
     session_data.update({"quiz_answers": [], "waiting_for_quiz_start": False})
@@ -338,7 +339,7 @@ def get_rag_response(question: str, user_id: str) -> str:
     is_affirmative = is_affirmative_response(raw_q)
     is_negative = is_negative_response(raw_q)
 
-    # --- BLOCK A: Handle special triggers and stateful responses ---
+    # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
     if raw_q == "__GET_ONBOARDING__":
         session_data['waiting_for_user_classification'] = True
         answer = "To personalize your experience, please let me know who you are."
@@ -356,8 +357,6 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Exclusive offers & discounts\n"
                       "• Direct interaction with brand owners\n"
                       "• A front-row seat to watch eco-friendly brands grow")
-            session_data['waiting_for_email'] = True
-            answer += "\n\nWould you like early access to offers + community events? Drop your email and we’ll add you to our Omi Fam newsletter."
         
         elif 'creator' in cleaned_q:
             session_data['user_type'] = 'creator'
@@ -385,7 +384,8 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "Please choose a valid option by clicking one of the buttons below."
         add_suggestion = False
     
-    elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and session_data.get('waiting_for_email'):
+    elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q):
+        # This handles email submission from ANY prompt
         session_data['waiting_for_email'] = False
         user_type = session_data.get('user_type')
         if user_type == 'brand_owner':
@@ -406,12 +406,11 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     elif session_data.get("waiting_for_quiz_start"):
         if is_affirmative:
-            cleaned_q = _clean_text(raw_q)
-            quiz_type = 'hair' if 'hair' in cleaned_q else 'skin' if 'skin' in cleaned_q else session_data.get('quiz_type_pending')
+            quiz_type = session_data.get('quiz_type_pending', 'skin') # Default to skin if somehow lost
             answer = start_quiz(session_data, quiz_type)
         else:
             session_data["waiting_for_quiz_start"] = False
-            answer = "No problem! What can I help you with instead?"
+            # Fall through to treat as a new query
         add_suggestion = False
 
     elif session_data.get("waiting_for_workbook_confirmation"):
@@ -428,7 +427,7 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     # --- BLOCK B: If no stateful response, handle new query ---
     if not answer:
-        add_suggestion = True # Add suggestions to general answers
+        add_suggestion = True
         retriever = get_retriever()
         if not retriever:
             answer = "My knowledge base is currently unavailable. Please try again later."
@@ -452,7 +451,28 @@ def get_rag_response(question: str, user_id: str) -> str:
                         prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
                         answer = get_llm().invoke(prompt).content
 
-    # --- Final Step: Append suggestion if applicable ---
+    # --- Final Step: Append newsletter or suggestion ---
+    should_prompt_email = False
+    user_type = session_data.get('user_type')
+    response_count = session_data.get('response_count', 0)
+    
+    # Rule for Eco Shoppers
+    if user_type == 'eco_shopper' and response_count == 3:
+        should_prompt_email = True
+        
+    # Fallback Rule for Brands/Creators who denied the workbook
+    if user_type in ['creator', 'brand_owner'] and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
+        should_prompt_email = True
+
+    if should_prompt_email and not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
+        session_data['waiting_for_email'] = True
+        answer += ("\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+                   "Drop your email and we’ll add you to our Omi Fam newsletter.")
+        add_suggestion = False
+        if is_negative_response(raw_q): # Check if the user's *current* message is a denial
+            session_data['email_prompt_denied'] = True
+            session_data['waiting_for_email'] = False
+
     if add_suggestion:
         answer += get_follow_up_suggestion(session_data)
 
