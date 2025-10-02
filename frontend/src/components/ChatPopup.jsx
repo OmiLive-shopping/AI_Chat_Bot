@@ -18,7 +18,7 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // --- KEPT: Your original hardcoded greeting on mount ---
+  // Initial greeting
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -37,8 +37,8 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       ]);
     }
   }, []);
-
-  // --- NEW: Automatically trigger the onboarding question after the greeting ---
+  
+  // Automatically trigger the onboarding question
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (
@@ -46,7 +46,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       lastMessage.type === "bot" &&
       lastMessage.text.includes("What can I help you with today?")
     ) {
-      handleSend("__GET_ONBOARDING__", true); // Use isSilent to hide from UI
+      handleSend("__GET_ONBOARDING__", true);
     }
   }, [messages]);
 
@@ -75,15 +75,15 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
-      chatBoxRef.current.scrollTo({
-        top: chatBoxRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    }
+        chatBoxRef.current.scrollTo({
+          top: chatBoxRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      }
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  // --- MODIFIED: handleSend now accepts messageOverride and an isSilent flag ---
+
   const handleSend = async (messageOverride, isSilent = false) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
@@ -91,7 +91,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
 
     setIsLoading(true);
 
-    // Only add user message to UI if it's not a special command or silent
     if (message !== "__GET_ONBOARDING__" && !isSilent) {
       setMessages((prev) => [...prev, { type: "user", text: message }]);
     }
@@ -116,7 +115,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         credentials: "include",
       });
 
-      // Your original non-streaming logic
       if (!res.body) {
         const data = await res.json();
         const finalAnswer =
@@ -130,11 +128,9 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             { type: "bot", text: finalAnswer, loading: false, streaming: false },
           ];
         });
-        setIsLoading(false); // Manually set loading false for non-streaming
         return;
       }
 
-      // Your original streaming logic is preserved
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let botMessage = "";
@@ -148,7 +144,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           { type: "bot", text: "", loading: true, streaming: true },
         ];
       });
-      
+
       let fullChunk = "";
       while (true) {
         const { done, value } = await reader.read();
@@ -156,14 +152,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
 
         fullChunk += decoder.decode(value, { stream: true });
         
-        // Try to parse the full chunk to get the answer
         try {
           const parsed = JSON.parse(fullChunk);
           if(parsed.answer) {
              botMessage = parsed.answer;
           }
         } catch(e) {
-          // If it's not a complete JSON yet, just display what we have
           botMessage = fullChunk;
         }
 
@@ -255,7 +249,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     ]);
   };
 
-  // --- MODIFIED: The check for showing the buttons ---
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
   const showOnboardingButtons =
     lastMessage &&
@@ -318,13 +311,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {/* --- NEW: Conditionally show buttons or the input bar --- */}
+        {/* --- UPDATED: Now shows three buttons --- */}
         {showOnboardingButtons ? (
           <div className="onboarding-buttons">
-            <button onClick={() => handleSend("Consumer", true)}>Consumer</button>
-            <button onClick={() => handleSend("Brand or Creator", true)}>
-              Brand or Creator
-            </button>
+            <button onClick={() => handleSend("Eco Shopper", true)}>Eco Shopper</button>
+            <button onClick={() => handleSend("Creator", true)}>Creator</button>
+            <button onClick={() => handleSend("Brand Owner", true)}>Brand Owner</button>
           </div>
         ) : (
           <div className="input-bar">
