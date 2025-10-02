@@ -161,6 +161,19 @@ def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
 
+# --- UPDATED: Keyword-based intent detection is back for reliability ---
+def detect_routine_intent(question: str) -> Optional[str]:
+    cleaned_q = _clean_text(question)
+    quiz_trigger_keywords = ['routine', 'regimen', 'help me with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care']
+    if 'quiz' in cleaned_q or any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
+        hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
+        skin_keywords = ['skin', 'face', 'acne', 'wrinkle']
+        has_hair = any(word in cleaned_q for word in hair_keywords)
+        has_skin = any(word in cleaned_q for word in skin_keywords)
+        if has_hair and not has_skin: return 'hair'
+        if has_skin and not has_hair: return 'skin'
+    return None
+
 def _make_key(text: str) -> str:
     s = str(text).lower()
     s = re.sub(r"&", "and", s)
@@ -171,6 +184,7 @@ def _make_key(text: str) -> str:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
+SMALL_TALK = ("how are you", "how are you doing", "whats up")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -179,7 +193,6 @@ def get_llm() -> ChatVertexAI:
     return _llm
     
 def get_classifier_llm() -> ChatVertexAI:
-    # Use a faster, cheaper model for simple classification
     return ChatVertexAI(model_name="gemini-1.5-flash-001", temperature=0.0, max_output_tokens=50)
 
 
@@ -203,13 +216,10 @@ def preload_faiss_index():
     get_brand_df()
     print("[INFO] FAISS index and brand data are ready.")
 
-# --- NEW: AI-Powered Semantic Intent Classification ---
 def classify_intent(question: str) -> str:
-    """Uses an LLM to classify the user's intent."""
     classifier = get_classifier_llm()
     prompt = f"""
     Classify the user's intent based on their message. Respond with ONLY one of the following labels:
-    - QUIZ_REQUEST: The user is asking for a personalized routine, a quiz, or help with their skin/hair.
     - RANK_BRANDS: The user is asking to see the ranked list of top brands.
     - LIST_BRANDS: The user is asking to see all the brands that are tracked.
     - SMALL_TALK: The user is making a greeting or asking a conversational question like "how are you?".
@@ -221,19 +231,15 @@ def classify_intent(question: str) -> str:
     try:
         response = classifier.invoke(prompt)
         intent = response.content.strip()
-        # Ensure the response is one of the valid labels
-        valid_intents = ["QUIZ_REQUEST", "RANK_BRANDS", "LIST_BRANDS", "SMALL_TALK", "GENERAL_QUESTION"]
+        valid_intents = ["RANK_BRANDS", "LIST_BRANDS", "SMALL_TALK", "GENERAL_QUESTION"]
         if intent in valid_intents:
             return intent
     except Exception as e:
         print(f"[ERROR] Intent classification failed: {e}")
-    
-    # Default to general question if classification fails or is invalid
     return "GENERAL_QUESTION"
 
-
 # =========================
-# Brand Logic (No Changes)
+# Brand Logic
 # =========================
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
@@ -320,7 +326,7 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     return df[df["brand_key"].isin(matches)]["brand_name"].tolist()
     
 # =========================
-# Quiz Logic (No changes)
+# Quiz Logic
 # =========================
 def offer_quiz(session_data: dict, quiz_type: str) -> str:
     session_data["waiting_for_quiz_start"] = True
@@ -375,7 +381,7 @@ def finish_quiz(session_data: dict) -> str:
         return "I had a little trouble generating your routine. Please try asking for the quiz again!"
 
 # =========================
-# Main Response Generator (Rewritten with Semantic Intent)
+# Main Response Generator
 # =========================
 def get_rag_response(question: str, user_id: str) -> str:
     session_data = _session_manager.get_session(user_id)
@@ -441,47 +447,40 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     # --- BLOCK B: Classify intent and handle new queries ---
     if not answer:
-        intent = classify_intent(raw_q)
-        print(f"[INFO] Classified intent as: {intent}")
+        # --- NEW: Hybrid Intent System ---
+        # 1. First, check for obvious, keyword-based quiz requests
+        routine_type = detect_routine_intent(raw_q)
+        if routine_type:
+            answer = offer_quiz(session_data, routine_type)
+        else:
+            # 2. If no keyword match, use the AI classifier
+            intent = classify_intent(raw_q)
+            print(f"[INFO] Classified intent as: {intent}")
 
-        if intent == 'QUIZ_REQUEST':
-            cleaned_q = _clean_text(raw_q)
-            if 'hair' in cleaned_q:
-                answer = offer_quiz(session_data, 'hair')
-            elif 'skin' in cleaned_q:
-                answer = offer_quiz(session_data, 'skin')
-            else: # If intent is quiz but topic is unclear, ask
-                answer = "Of course! Did you want the skin quiz or the hair quiz?"
-        
-        elif intent == 'RANK_BRANDS':
-            answer = respond_rank_all_brands()
+            if intent == 'RANK_BRANDS':
+                answer = respond_rank_all_brands()
+            elif intent == 'LIST_BRANDS':
+                answer = respond_list_all_brands()
+            elif intent == 'SMALL_TALK':
+                answer = "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
+            elif intent == 'GENERAL_QUESTION':
+                candidates = fuzzy_lookup_brand_candidates(raw_q)
+                if len(candidates) == 1:
+                    brand_name = candidates[0]
+                    session_data["waiting_for_rank_confirmation"] = True
+                    session_data["brand_to_rank"] = brand_name
+                    answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
+                elif len(candidates) > 1:
+                    answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
-        elif intent == 'LIST_BRANDS':
-            answer = respond_list_all_brands()
-
-        elif intent == 'SMALL_TALK':
-            answer = "I'm doing great, thank you for asking! I'm ready to help you with any sustainability questions you have."
-
-        elif intent == 'GENERAL_QUESTION':
-            # For general questions, first try a quick brand lookup
-            candidates = fuzzy_lookup_brand_candidates(raw_q)
-            if len(candidates) == 1:
-                brand_name = candidates[0]
-                session_data["waiting_for_rank_confirmation"] = True
-                session_data["brand_to_rank"] = brand_name
-                answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
-            elif len(candidates) > 1:
-                answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-
-            # If no quick match, fall back to the main RAG system
-            if not answer:
-                context_docs = get_retriever().invoke(raw_q)
-                context = "\n\n".join(d.page_content for d in context_docs)
-                if not context.strip():
-                    answer = "I'm not sure how to answer that. Could you try rephrasing?"
-                else:
-                    prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-                    answer = get_llm().invoke(prompt).content
+                if not answer: # Fallback to RAG
+                    context_docs = get_retriever().invoke(raw_q)
+                    context = "\n\n".join(d.page_content for d in context_docs)
+                    if not context.strip():
+                        answer = "I'm not sure how to answer that. Could you try rephrasing?"
+                    else:
+                        prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+                        answer = get_llm().invoke(prompt).content
     
     # --- Final Step: Append newsletter prompt if needed ---
     if session_data.get('response_count') == 3 and not session_data.get('email_prompted'):
@@ -499,7 +498,8 @@ def get_rag_response(question: str, user_id: str) -> str:
                 "\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                 "You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community."
             )
-        answer += newsletter_prompt
+        # Ensure answer is a string before appending
+        answer = str(answer) + newsletter_prompt
     
     _session_manager.update_session(user_id, session_data)
     return answer
