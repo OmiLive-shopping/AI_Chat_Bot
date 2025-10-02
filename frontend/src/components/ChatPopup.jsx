@@ -209,6 +209,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
+  // --- MODIFIED: Connects to the chat brain after submitting ---
   const handleEmailSubmit = async () => {
     const trimmed = email.trim();
     const isValid = /\S+@\S+\.\S+/.test(trimmed);
@@ -223,22 +224,23 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
+      
+      // Also send the email to the chat endpoint to get the correct follow-up response
+      handleSend(trimmed, true);
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          type: "bot",
-          text: "🎉 Thanks! You're now part of the Omi community. Let's keep going!",
-          loading: false,
-        },
-      ]);
     } catch (err) {
       console.error("Failed to register email:", err);
     }
   };
 
+  // --- MODIFIED: Connects to the chat brain after rejecting ---
   const handleEmailReject = () => {
     setSessionDismissed(true);
+    
+    // Silently send a "no thanks" message to the backend
+    // so it knows not to ask again this session.
+    handleSend("no thanks", true);
+
     setMessages((prev) => [
       ...prev,
       {
@@ -287,6 +289,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
+        {/* This logic now checks for the emailSubmitted flag from localStorage */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) => m.text.includes("What's your email?")) && (
@@ -311,7 +314,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {/* --- UPDATED: Now shows three buttons --- */}
         {showOnboardingButtons ? (
           <div className="onboarding-buttons">
             <button onClick={() => handleSend("Eco Shopper", true)}>Eco Shopper</button>
