@@ -161,7 +161,6 @@ def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
 
-# --- UPDATED: Keyword-based intent detection is back for reliability ---
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
     quiz_trigger_keywords = ['routine', 'regimen', 'help me with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care']
@@ -216,14 +215,16 @@ def preload_faiss_index():
     get_brand_df()
     print("[INFO] FAISS index and brand data are ready.")
 
+# --- UPDATED: More accurate classifier prompt ---
 def classify_intent(question: str) -> str:
     classifier = get_classifier_llm()
     prompt = f"""
     Classify the user's intent based on their message. Respond with ONLY one of the following labels:
-    - RANK_BRANDS: The user is asking to see the ranked list of top brands.
-    - LIST_BRANDS: The user is asking to see all the brands that are tracked.
-    - SMALL_TALK: The user is making a greeting or asking a conversational question like "how are you?".
-    - GENERAL_QUESTION: The user is asking any other question about products, brands, sustainability, etc.
+    - QUIZ_REQUEST: The user is asking for a personalized routine, a quiz, or help with their skin/hair.
+    - RANK_BRANDS: The user is asking to see the ranked list of top brands, using words like "rank brands" or "brand ranking".
+    - LIST_BRANDS: The user is asking for a list of all brands, using words like "list brands" or "what brands".
+    - SMALL_TALK: The user is making a simple greeting or asking a conversational question like "how are you?".
+    - GENERAL_QUESTION: The user is asking any other question about products, specific brands by name, sustainability topics, etc.
 
     User Message: "{question}"
     Classification:
@@ -231,12 +232,14 @@ def classify_intent(question: str) -> str:
     try:
         response = classifier.invoke(prompt)
         intent = response.content.strip()
-        valid_intents = ["RANK_BRANDS", "LIST_BRANDS", "SMALL_TALK", "GENERAL_QUESTION"]
+        valid_intents = ["QUIZ_REQUEST", "RANK_BRANDS", "LIST_BRANDS", "SMALL_TALK", "GENERAL_QUESTION"]
         if intent in valid_intents:
             return intent
     except Exception as e:
         print(f"[ERROR] Intent classification failed: {e}")
+    
     return "GENERAL_QUESTION"
+
 
 # =========================
 # Brand Logic
@@ -423,7 +426,8 @@ def get_rag_response(question: str, user_id: str) -> str:
     elif session_data.get("waiting_for_quiz_start"):
         if is_affirmative:
             answer = start_quiz(session_data)
-        # If not affirmative, we'll let it fall through to be re-classified
+        else: # On any non-affirmative response, clear the state and fall through
+            session_data["waiting_for_quiz_start"] = False
             
     elif session_data.get("waiting_for_rank_confirmation"):
         if is_affirmative:
@@ -445,15 +449,19 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "No problem! What else can I help you with today?"
         session_data['waiting_for_workbook_confirmation'] = False
 
-    # --- BLOCK B: Classify intent and handle new queries ---
+    # --- BLOCK B: If no stateful response, handle new query ---
     if not answer:
-        # --- NEW: Hybrid Intent System ---
-        # 1. First, check for obvious, keyword-based quiz requests
+        # --- UPDATED: Restore state clearing for new topics ---
+        session_data.update({
+            'waiting_for_quiz_start': False, 'quiz_type_pending': None,
+            'waiting_for_rank_confirmation': False, 'brand_to_rank': None
+        })
+        
+        # --- Hybrid Intent System ---
         routine_type = detect_routine_intent(raw_q)
         if routine_type:
             answer = offer_quiz(session_data, routine_type)
         else:
-            # 2. If no keyword match, use the AI classifier
             intent = classify_intent(raw_q)
             print(f"[INFO] Classified intent as: {intent}")
 
@@ -473,7 +481,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                 elif len(candidates) > 1:
                     answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
 
-                if not answer: # Fallback to RAG
+                if not answer:
                     context_docs = get_retriever().invoke(raw_q)
                     context = "\n\n".join(d.page_content for d in context_docs)
                     if not context.strip():
@@ -493,12 +501,11 @@ def get_rag_response(question: str, user_id: str) -> str:
                 "You'll get early access to sustainable brand deals and new eco finds.\n\n"
                 "I've also got a free detailed live shopping workbook I can send you too! What's your email? 🌱"
             )
-        else: # Default to consumer or if user_type is not set
+        else:
             newsletter_prompt = (
                 "\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                 "You'll get early access to sustainable brand deals, new eco finds, and connect with our conscious shopping community."
             )
-        # Ensure answer is a string before appending
         answer = str(answer) + newsletter_prompt
     
     _session_manager.update_session(user_id, session_data)
