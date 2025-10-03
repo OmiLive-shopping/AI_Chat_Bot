@@ -13,6 +13,7 @@ export default function ChatPopup({ onClose }) {
   );
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false); // ✅ Explicit onboarding state
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
@@ -37,19 +38,19 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       ]);
     }
   }, []);
-  
+
   // Automatically trigger the onboarding question
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (
       messages.length === 1 &&
-      lastMessage.type === "bot" &&
+      lastMessage?.type === "bot" &&
       lastMessage.text.includes("What can I help you with today?")
     ) {
       handleSend("__GET_ONBOARDING__", true);
+      setShowOnboarding(true); // ✅ show onboarding buttons at start
     }
   }, [messages]);
-
 
   // Auto-resize input
   useEffect(() => {
@@ -60,10 +61,10 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
 
   // Focus input
   useEffect(() => {
-    if (textareaRef.current && !showOnboardingButtons) {
+    if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
     }
-  }, [isLoading, messages]);
+  }, [isLoading, messages, showOnboarding]);
 
   const stopContinuousScrolling = () => {
     if (scrollIntervalRef.current) {
@@ -75,14 +76,13 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
-        chatBoxRef.current.scrollTo({
-          top: chatBoxRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      }
+      chatBoxRef.current.scrollTo({
+        top: chatBoxRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
     return () => stopContinuousScrolling();
   }, [messages]);
-
 
   const handleSend = async (messageOverride, isSilent = false) => {
     const message =
@@ -151,13 +151,13 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         if (done) break;
 
         fullChunk += decoder.decode(value, { stream: true });
-        
+
         try {
           const parsed = JSON.parse(fullChunk);
-          if(parsed.answer) {
-             botMessage = parsed.answer;
+          if (parsed.answer) {
+            botMessage = parsed.answer;
           }
-        } catch(e) {
+        } catch (e) {
           botMessage = fullChunk;
         }
 
@@ -224,10 +224,8 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-      
-      // Also send the email to the chat endpoint to get the correct follow-up response
-      handleSend(trimmed, true);
 
+      handleSend(trimmed, true);
     } catch (err) {
       console.error("Failed to register email:", err);
     }
@@ -236,9 +234,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   // --- MODIFIED: Connects to the chat brain after rejecting ---
   const handleEmailReject = () => {
     setSessionDismissed(true);
-    
-    // Silently send a "no thanks" message to the backend
-    // so it knows not to ask again this session.
+
     handleSend("no thanks", true);
 
     setMessages((prev) => [
@@ -250,12 +246,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       },
     ]);
   };
-
-  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-  const showOnboardingButtons =
-    lastMessage &&
-    lastMessage.type === "bot" &&
-    lastMessage.text.includes("personalize your experience");
 
   return (
     <div id="chat-popup">
@@ -289,7 +279,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
-        {/* This logic now checks for the emailSubmitted flag from localStorage */}
+        {/* Email prompt */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) => m.text.includes("What's your email?")) && (
@@ -314,11 +304,33 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {showOnboardingButtons ? (
+        {/* Onboarding OR Chat Input */}
+        {showOnboarding ? (
           <div className="onboarding-buttons">
-            <button onClick={() => handleSend("Eco Shopper", true)}>Eco Shopper</button>
-            <button onClick={() => handleSend("Creator", true)}>Creator</button>
-            <button onClick={() => handleSend("Brand Owner", true)}>Brand Owner</button>
+            <button
+              onClick={() => {
+                handleSend("Eco Shopper", true);
+                setShowOnboarding(false); // ✅ hide after selection
+              }}
+            >
+              Eco Shopper
+            </button>
+            <button
+              onClick={() => {
+                handleSend("Creator", true);
+                setShowOnboarding(false);
+              }}
+            >
+              Creator
+            </button>
+            <button
+              onClick={() => {
+                handleSend("Brand Owner", true);
+                setShowOnboarding(false);
+              }}
+            >
+              Brand Owner
+            </button>
           </div>
         ) : (
           <div className="input-bar">
