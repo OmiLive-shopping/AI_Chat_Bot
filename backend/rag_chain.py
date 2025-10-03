@@ -59,6 +59,7 @@ except Exception as e:
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
 BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
+# --- IMPORTANT: Double-check that this filename EXACTLY matches your file in the data/ folder ---
 WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx" 
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
@@ -175,7 +176,7 @@ def is_affirmative_response(text: str) -> bool:
 def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
-
+    
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
     quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care']
@@ -191,6 +192,7 @@ def detect_routine_intent(question: str) -> Optional[str]:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
+SMALL_TALK = ("how are you", "how are you doing", "whats up")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -257,7 +259,13 @@ def get_brand_ranking_single(brand_name: str) -> str:
     
     row = row.iloc[0]
     score = row.get('final_score', 'N/A')
+    
+    breakdown_cols = [ "recycled/upcycled_materials", "end_of_life_solutions_(compostable_packaging/zero_waste)", "worker_welfare/living_wage", "local_sourcing", "sustainability_data_accessibility", "marketing_honesty/_certifications" ]
+    breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
+
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
+    if breakdown:
+        response += "\n" + "\n".join(breakdown)
     return response
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
@@ -282,7 +290,7 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
 def offer_quiz(session_data: dict, quiz_type: str) -> str:
     session_data["waiting_for_quiz_start"] = True
     session_data["quiz_type_pending"] = quiz_type
-    return "Want to personalize your experience? Take our quick quiz to identify your hair & skin types so we can recommend the best products. Shall we start?"
+    return "Of course! To recommend the best products, I can ask you a few quick questions to identify your hair & skin type. Shall we start the quiz?"
 
 def start_quiz(session_data: dict, quiz_type: str) -> str:
     session_data.update({"quiz_answers": [], "waiting_for_quiz_start": False})
@@ -494,7 +502,6 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     if should_prompt_email:
         session_data['waiting_for_email'] = True
-        # The prompt is now universal, as the creator/brand specific one is handled contextually
         answer += ("\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                    "Drop your email and we’ll add you to our Omi Fam newsletter.")
         add_suggestion = False
