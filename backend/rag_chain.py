@@ -58,7 +58,8 @@ except Exception as e:
     db = None
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
-BRAND_CSV = os.path.join(DATA_DIR, "cleaned_brand_metrics.csv") # Using the cleaned version
+BRAND_CSV = os.path.join(DATA_DIR, "brand_metric_dataset.csv")
+# --- IMPORTANT: Double-check that this filename EXACTLY matches your file in the data/ folder ---
 WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx" 
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
@@ -178,8 +179,8 @@ def is_negative_response(text: str) -> bool:
     
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
-    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz']
-    if any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
+    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care']
+    if 'quiz' in cleaned_q or any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
         hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
         skin_keywords = ['skin', 'face', 'acne', 'wrinkle']
         has_hair = any(word in cleaned_q for word in hair_keywords)
@@ -191,6 +192,7 @@ def detect_routine_intent(question: str) -> Optional[str]:
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
 _brand_df: pd.DataFrame = pd.DataFrame()
+SMALL_TALK = ("how are you", "how are you doing", "whats up")
 
 def get_llm() -> ChatVertexAI:
     global _llm
@@ -234,15 +236,18 @@ def get_follow_up_suggestion(session_data: dict) -> str:
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
     if not _brand_df.empty: return _brand_df
-    cleaned_csv_path = os.path.join(DATA_DIR, "cleaned_brand_metrics.csv")
-    if not os.path.exists(cleaned_csv_path): return pd.DataFrame()
+    if not os.path.exists(BRAND_CSV): return pd.DataFrame()
     try:
-        df = pd.read_csv(cleaned_csv_path)
+        df = pd.read_csv(BRAND_CSV)
+        df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
+        df = df.rename(columns={df.columns[0]: "brand_name", df.columns[-2]: "final_score"})
+        df = df.dropna(subset=['brand_name', 'final_score'])
+        df = df[df["brand_name"].astype(str).str.strip().ne("")]
         df["brand_key"] = df["brand_name"].apply(_make_key)
         _brand_df = df
         return df
     except Exception as e:
-        print(f"[ERROR] Failed to load cleaned brand metrics: {e}")
+        print(f"[ERROR] Failed to load brand metrics: {e}")
         return pd.DataFrame()
 
 def get_brand_ranking_single(brand_name: str) -> str:
@@ -254,24 +259,14 @@ def get_brand_ranking_single(brand_name: str) -> str:
     
     row = row.iloc[0]
     score = row.get('final_score', 'N/A')
+    
+    breakdown_cols = [ "recycled/upcycled_materials", "end_of_life_solutions_(compostable_packaging/zero_waste)", "worker_welfare/living_wage", "local_sourcing", "sustainability_data_accessibility", "marketing_honesty/_certifications" ]
+    breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
+
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
+    if breakdown:
+        response += "\n" + "\n".join(breakdown)
     return response
-
-def suggest_top_brands() -> str:
-    df = get_brand_df()
-    if df.empty: return "I don't have brand information right now."
-    top_brands = df.sort_values(by='final_score', ascending=False).head(3)
-    response = "Of course! Some of the most highly-ranked eco-friendly brands I track are:\n"
-    for _, row in top_brands.iterrows():
-        response += f"\n- **{row['brand_name']}** (Score: {row['final_score']}/30)"
-    return response
-
-def respond_with_all_brands() -> str:
-    df = get_brand_df()
-    if df.empty: return "I don't have brand information right now."
-    brands = sorted(df["brand_name"].dropna().unique())
-    response_intro = "Sure! Here are some of the eco-friendly brands we have ranked on a scale of 30:"
-    return f"{response_intro}\n\n" + ", ".join(brands)
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
     if _clean_text(user_text) in NEGATIONS: return []
@@ -398,7 +393,7 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "Please choose a valid option by clicking one of the buttons below."
         add_suggestion = False
     
-    elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q) and session_data.get('waiting_for_email'):
+    elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q):
         session_data['waiting_for_email'] = False
         user_type = session_data.get('user_type')
         if user_type == 'brand_owner':
@@ -465,40 +460,34 @@ def get_rag_response(question: str, user_id: str) -> str:
         
         cleaned_q = _clean_text(raw_q)
         
-        if "suggest" in cleaned_q and "brand" in cleaned_q:
-            answer = suggest_top_brands()
-        elif "rank" in cleaned_q and "brand" in cleaned_q:
-            answer = respond_with_all_brands()
-        elif "list" in cleaned_q and "brand" in cleaned_q:
-            answer = respond_with_all_brands()
+        quiz_type = detect_routine_intent(raw_q)
+        if quiz_type:
+            answer = offer_quiz(session_data, quiz_type)
+            session_data['quiz_type_pending'] = quiz_type
         else:
-            quiz_type = detect_routine_intent(raw_q)
-            if quiz_type:
-                answer = offer_quiz(session_data, quiz_type)
-            else:
-                candidates = fuzzy_lookup_brand_candidates(raw_q)
-                if len(candidates) == 1:
-                    brand_name = candidates[0]
-                    session_data["waiting_for_rank_confirmation"] = True
-                    session_data["brand_to_rank"] = brand_name
-                    answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
-                    add_suggestion = False
-                elif len(candidates) > 1:
-                    answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-                    add_suggestion = False
+            candidates = fuzzy_lookup_brand_candidates(raw_q)
+            if len(candidates) == 1:
+                brand_name = candidates[0]
+                session_data["waiting_for_rank_confirmation"] = True
+                session_data["brand_to_rank"] = brand_name
+                answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
+                add_suggestion = False
+            elif len(candidates) > 1:
+                answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+                add_suggestion = False
 
-                if not answer: # Fallback to general RAG
-                    retriever = get_retriever()
-                    if not retriever:
-                        answer = "My knowledge base is currently unavailable. Please try again later."
+            if not answer: # Fallback to general RAG
+                retriever = get_retriever()
+                if not retriever:
+                    answer = "My knowledge base is currently unavailable. Please try again later."
+                else:
+                    context_docs = retriever.invoke(raw_q)
+                    context = "\n\n".join(d.page_content for d in context_docs)
+                    if not context.strip():
+                        answer = "I'm not sure how to answer that. Could you try rephrasing?"
                     else:
-                        context_docs = retriever.invoke(raw_q)
-                        context = "\n\n".join(d.page_content for d in context_docs)
-                        if not context.strip():
-                            answer = "I'm not sure how to answer that. Could you try rephrasing?"
-                        else:
-                            prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-                            answer = get_llm().invoke(prompt).content
+                        prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+                        answer = get_llm().invoke(prompt).content
     
     # --- Final Step: Append newsletter or suggestion ---
     should_prompt_email = False
@@ -514,7 +503,7 @@ def get_rag_response(question: str, user_id: str) -> str:
     if should_prompt_email:
         session_data['waiting_for_email'] = True
         answer += ("\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
-                   "What's your email? 🌱")
+                   "Drop your email and we’ll add you to our Omi Fam newsletter.")
         add_suggestion = False
     
     if add_suggestion:
