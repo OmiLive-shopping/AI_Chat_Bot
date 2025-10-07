@@ -226,7 +226,7 @@ def get_follow_up_suggestion(session_data: dict) -> str:
     offered.append(suggestion)
     session_data["offered_suggestions"] = offered
     
-    return f"\n\n_Psst... {suggestion}_"
+    return f"\n_Psst... {suggestion}_"
 
 # =========================
 # Brand Logic
@@ -260,7 +260,7 @@ def get_brand_ranking_single(brand_name: str) -> str:
 
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
     if breakdown:
-        response += "\n" + "\n".join(breakdown)
+        response += "\n".join(breakdown)
     return response
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
@@ -386,7 +386,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Flat fee partnerships\n"
                       "• Expanding your reach with eco-conscious buyers")
             session_data['waiting_for_workbook_confirmation'] = True
-            answer += "\n\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
+            answer += "\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
 
         elif 'brand owner' in cleaned_q:
             session_data['user_type'] = 'brand_owner'
@@ -396,7 +396,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Smart product listing & discovery tools\n"
                       "• Live storytelling that builds trust")
             session_data['waiting_for_workbook_confirmation'] = True
-            answer += "\n\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
+            answer += "\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
         
         else: 
             session_data['waiting_for_user_classification'] = True 
@@ -511,14 +511,14 @@ def get_rag_response(question: str, user_id: str) -> str:
     response_count = session_data.get('response_count', 0)
     
     if not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
-        if user_type == 'eco_shopper' and response_count == 3:
+        if user_type == 'eco_shopper' and response_count == 4:
             should_prompt_email = True
         elif user_type in ['creator', 'brand_owner'] and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
             should_prompt_email = True
 
     if should_prompt_email:
         session_data['waiting_for_email'] = True
-        answer += ("\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+        answer += ("\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                    "What's your email? 🌱")
         add_suggestion = False
     
