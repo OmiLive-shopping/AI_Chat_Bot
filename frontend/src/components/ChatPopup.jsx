@@ -1,4 +1,3 @@
-// frontend/src/components/ChatPopup.jsx
 import React, { useState, useRef, useEffect } from "react";
 import ChatMessage from "./ChatMessage";
 
@@ -13,13 +12,12 @@ export default function ChatPopup({ onClose }) {
   );
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false); // ✅ Explicit onboarding state
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Initial greeting
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -39,7 +37,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   }, []);
 
-  // Automatically trigger the onboarding question
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (
@@ -48,18 +45,16 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       lastMessage.text.includes("What can I help you with today?")
     ) {
       handleSend("__GET_ONBOARDING__", true);
-      setShowOnboarding(true); // ✅ show onboarding buttons at start
+      setShowOnboarding(true);
     }
   }, [messages]);
 
-  // Auto-resize input
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
-  // Focus input
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -73,7 +68,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTo({
@@ -84,7 +78,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  const handleSend = async (messageOverride, isSilent = false) => {
+    const handleSend = async (messageOverride, isSilent = false) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
@@ -209,7 +203,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // --- MODIFIED: Connects to the chat brain after submitting ---
   const handleEmailSubmit = async () => {
     const trimmed = email.trim();
     const isValid = /\S+@\S+\.\S+/.test(trimmed);
@@ -224,19 +217,15 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-
       handleSend(trimmed, true);
     } catch (err) {
       console.error("Failed to register email:", err);
     }
   };
 
-  // --- MODIFIED: Connects to the chat brain after rejecting ---
   const handleEmailReject = () => {
     setSessionDismissed(true);
-
     handleSend("no thanks", true);
-
     setMessages((prev) => [
       ...prev,
       {
@@ -279,10 +268,11 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
-        {/* Email prompt */}
         {!emailSubmitted &&
           !sessionDismissed &&
-          messages.some((m) => m.text.includes("What's your email?")) && (
+          messages.some((m) =>
+            /drop your email|send.*workbook|what'?s your email/i.test(m.text)
+          ) && (
             <div className="email-prompt">
               <input
                 type="email"
@@ -304,13 +294,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {/* Onboarding OR Chat Input */}
         {showOnboarding ? (
           <div className="onboarding-buttons">
             <button
               onClick={() => {
                 handleSend("Eco Shopper", true);
-                setShowOnboarding(false); // ✅ hide after selection
+                setShowOnboarding(false);
               }}
             >
               Eco Shopper
