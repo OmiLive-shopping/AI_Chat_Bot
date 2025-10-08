@@ -136,7 +136,7 @@ class UserSessionManager:
             "quiz_answers": [], "waiting_for_quiz_start": False,
             "waiting_for_rank_confirmation": False, "brand_to_rank": None,
             "waiting_for_workbook_confirmation": False,
-            "waiting_for_user_classification": False, "user_type": None,
+            "user_type": None,
             "waiting_for_email": False, "offered_suggestions": [],
             "email_prompt_denied": False, "workbook_sent": False,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
@@ -175,7 +175,7 @@ def is_affirmative_response(text: str) -> bool:
 def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
-
+    
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
     quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz']
@@ -258,7 +258,7 @@ def get_brand_ranking_single(brand_name: str) -> str:
     breakdown_cols = [c for c in df.columns if c not in ['brand_name', 'brand_key', 'final_score']]
     breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
 
-    response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
+    response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**"
     if breakdown:
         response += "\n".join(breakdown)
     return response
@@ -281,16 +281,17 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
 
 def respond_with_brand_info() -> str:
     df = get_brand_df()
-    if df.empty or 'final_score' not in df.columns:
-        return "I don't have brand ranking information right now."
+    if df.empty:
+        return "I don't have brand information right now."
     
-    top_ranked = df.sort_values(by='final_score', ascending=False).head(5)
+    top_brands = df.sort_values(by='final_score', ascending=False).head(5)
+    
     response_lines = ["Sure! Here are some of the top eco-friendly brands we've ranked on a scale of 30:\n"]
-    for i, row in enumerate(top_ranked.itertuples(), 1):
-        response_lines.append(f"{i}. **{row.brand_name}** (Score: {row.final_score})")
+    for _, row in top_brands.iterrows():
+        response_lines.append(f"- **{row['brand_name']}** (Score: {row['final_score']}/30)")
         
     all_brands = sorted(df["brand_name"].dropna().unique())
-    response_lines.append("\nI also track: " + ", ".join(all_brands))
+    response_lines.append("\nI also track all of these brands: " + ", ".join(all_brands))
     
     return "\n".join(response_lines)
     
@@ -359,14 +360,9 @@ def get_rag_response(question: str, user_id: str) -> str:
     is_negative = is_negative_response(raw_q)
 
     # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
-    if raw_q == "__GET_ONBOARDING__":
-        session_data['waiting_for_user_classification'] = True
-        answer = "To personalize your experience, please let me know who you are."
-        add_suggestion = False
-
-    elif session_data.get("waiting_for_user_classification"):
+    # Onboarding is now handled by the first user message, not a special trigger
+    if session_data.get('response_count') == 1:
         cleaned_q = _clean_text(raw_q)
-        session_data['waiting_for_user_classification'] = False
         
         if 'eco shopper' in cleaned_q:
             session_data['user_type'] = 'eco_shopper'
@@ -386,7 +382,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Flat fee partnerships\n"
                       "• Expanding your reach with eco-conscious buyers")
             session_data['waiting_for_workbook_confirmation'] = True
-            answer += "\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
+            answer += "\n\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
 
         elif 'brand owner' in cleaned_q:
             session_data['user_type'] = 'brand_owner'
@@ -399,7 +395,6 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer += "\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
         
         else: 
-            session_data['waiting_for_user_classification'] = True 
             answer = "Please choose a valid option by clicking one of the buttons below."
         add_suggestion = False
     
@@ -426,7 +421,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         if is_affirmative:
             quiz_type = session_data.get('quiz_type_pending', 'skin')
             answer = start_quiz(session_data, quiz_type)
-        else:
+        else: # Any non-affirmative response cancels the pending offer
             session_data["waiting_for_quiz_start"] = False
         add_suggestion = False
 
@@ -454,8 +449,8 @@ def get_rag_response(question: str, user_id: str) -> str:
     elif is_negative_response(raw_q) and session_data.get('waiting_for_email'):
         session_data['email_prompt_denied'] = True
         session_data['waiting_for_email'] = False
-        answer = "👍 No worries! We'll keep chatting here."
-        add_suggestion = False
+        answer = "" # Let frontend handle the "No worries" message
+        add_suggestion = True
 
     # --- BLOCK B: If no stateful response, handle new query ---
     if not answer:
@@ -476,7 +471,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif "list brand" in cleaned_q:
              answer = respond_with_brand_info()
         else:
-            # Fallback to other logic
             quiz_type = detect_routine_intent(raw_q)
             if quiz_type:
                 answer = offer_quiz(session_data, quiz_type)

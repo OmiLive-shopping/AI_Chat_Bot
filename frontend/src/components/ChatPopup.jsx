@@ -1,3 +1,4 @@
+// frontend/src/components/ChatPopup.jsx
 import React, { useState, useRef, useEffect } from "react";
 import ChatMessage from "./ChatMessage";
 
@@ -12,12 +13,12 @@ export default function ChatPopup({ onClose }) {
   );
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
+  // --- UPDATED: Shows both greeting and onboarding question instantly ---
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -33,33 +34,27 @@ Ask me about:
 
 Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         },
+        {
+          type: "bot",
+          text: "To personalize your experience, please let me know who you are.",
+        },
       ]);
     }
   }, []);
 
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (
-      messages.length === 1 &&
-      lastMessage?.type === "bot" &&
-      lastMessage.text.includes("What can I help you with today?")
-    ) {
-      handleSend("__GET_ONBOARDING__", true);
-      setShowOnboarding(true);
-    }
-  }, [messages]);
-
+  // Auto-resize input
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
+  // Focus input
   useEffect(() => {
-    if (textareaRef.current && !showOnboarding) {
+    if (textareaRef.current && !showOnboardingButtons) {
       textareaRef.current.focus();
     }
-  }, [isLoading, messages, showOnboarding]);
+  }, [isLoading, messages, showOnboardingButtons]);
 
   const stopContinuousScrolling = () => {
     if (scrollIntervalRef.current) {
@@ -68,24 +63,26 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
+  // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
-      chatBoxRef.current.scrollTo({
-        top: chatBoxRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    }
+        chatBoxRef.current.scrollTo({
+          top: chatBoxRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      }
     return () => stopContinuousScrolling();
   }, [messages]);
 
-    const handleSend = async (messageOverride, isSilent = false) => {
+
+  const handleSend = async (messageOverride, isSilent = false) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
     setIsLoading(true);
 
-    if (message !== "__GET_ONBOARDING__" && !isSilent) {
+    if (!isSilent) {
       setMessages((prev) => [...prev, { type: "user", text: message }]);
     }
     setInput("");
@@ -145,13 +142,13 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         if (done) break;
 
         fullChunk += decoder.decode(value, { stream: true });
-
+        
         try {
           const parsed = JSON.parse(fullChunk);
-          if (parsed.answer) {
-            botMessage = parsed.answer;
+          if(parsed.answer) {
+             botMessage = parsed.answer;
           }
-        } catch (e) {
+        } catch(e) {
           botMessage = fullChunk;
         }
 
@@ -236,6 +233,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     ]);
   };
 
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const showOnboardingButtons =
+    lastMessage &&
+    lastMessage.type === "bot" &&
+    lastMessage.text.includes("personalize your experience");
+
   return (
     <div id="chat-popup">
       <header className="chat-header">
@@ -294,32 +297,11 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {showOnboarding ? (
+        {showOnboardingButtons ? (
           <div className="onboarding-buttons">
-            <button
-              onClick={() => {
-                handleSend("Eco Shopper", true);
-                setShowOnboarding(false);
-              }}
-            >
-              Eco Shopper
-            </button>
-            <button
-              onClick={() => {
-                handleSend("Creator", true);
-                setShowOnboarding(false);
-              }}
-            >
-              Creator
-            </button>
-            <button
-              onClick={() => {
-                handleSend("Brand Owner", true);
-                setShowOnboarding(false);
-              }}
-            >
-              Brand Owner
-            </button>
+            <button onClick={() => handleSend("Eco Shopper", true)}>Eco Shopper</button>
+            <button onClick={() => handleSend("Creator", true)}>Creator</button>
+            <button onClick={() => handleSend("Brand Owner", true)}>Brand Owner</button>
           </div>
         ) : (
           <div className="input-bar">
