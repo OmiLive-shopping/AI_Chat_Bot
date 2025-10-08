@@ -1,30 +1,40 @@
 import React, { useState, useRef, useEffect } from "react";
-import ChatMessage from "./ChatMessage";
 
+// The BASE_URL for the backend API
 const BASE_URL = "https://omi-backend-355024965259.us-central1.run.app";
 
-export default function ChatPopup({ onClose }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [email, setEmail] = useState(localStorage.getItem("userEmail") || "");
-  const [emailSubmitted, setEmailSubmitted] = useState(
-    !!localStorage.getItem("userEmail")
+// Inlined ChatMessage component to resolve the import error.
+function ChatMessage({ type, text, loading }) {
+  const isBot = type === 'bot';
+  // Dynamically assign CSS classes based on the message type (user or bot)
+  const messageClass = isBot ? 'bot-message' : 'user-message';
+
+  // Render the message text, preserving line breaks
+  const renderText = () => {
+    // Using a regex to split by newlines and wrapping each line in a span
+    // This is a common pattern for rendering text with preserved formatting in React
+    return text.split(/(\n)/).map((item, index) =>
+      item.match(/\n/) ? <br key={index} /> : <span key={index}>{item}</span>
+    );
+  };
+
+  return (
+    <div className={`chat-message ${messageClass}`}>
+      <div className="message-content">
+        {renderText()}
+        {loading && <span className="loading-dots"></span>}
+      </div>
+    </div>
   );
-  const [sessionDismissed, setSessionDismissed] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [hasSentOnboarding, setHasSentOnboarding] = useState(false);
+}
 
-  const chatBoxRef = useRef(null);
-  const textareaRef = useRef(null);
-  const scrollIntervalRef = useRef(null);
 
-  useEffect(() => {
-    if (messages.length === 0) {
-      setMessages([
-        {
-          type: "bot",
-          text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨
+export default function ChatPopup({ onClose }) {
+  // Set initial state to include both welcome messages from the start.
+  const [messages, setMessages] = useState([
+    {
+      type: "bot",
+      text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨
 I'm here to help you discover sustainable brands, learn eco tips, and master live shopping - whether you're a conscious shopper or a creator ready to go live!
 Ask me about:
 🛍️ Sustainable shopping & green living tips
@@ -33,30 +43,35 @@ Ask me about:
 🎯 Creator resources - Get our free step-by-step live shopping workbook!
 
 Ready to chat about conscious commerce? What can I help you with today? 🎉`,
-        },
-      ]);
+    },
+    {
+      type: "bot",
+      text: "To personalize your experience, please let me know who you are."
     }
-  }, []);
+  ]);
 
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (
-      messages.length === 1 &&
-      lastMessage?.type === "bot" &&
-      lastMessage.text.includes("What can I help you with today?") &&
-      !hasSentOnboarding
-    ) {
-      setHasSentOnboarding(true);
-      handleSend("__GET_ONBOARDING__", true);
-    }
-  }, [messages, hasSentOnboarding]);
+  const [input, setInput] = useState("");
+  const [email, setEmail] = useState(localStorage.getItem("userEmail") || "");
+  const [emailSubmitted, setEmailSubmitted] = useState(
+    !!localStorage.getItem("userEmail")
+  );
+  const [sessionDismissed, setSessionDismissed] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  // Default to true to show onboarding buttons immediately.
+  const [showOnboarding, setShowOnboarding] = useState(true);
 
+  const chatBoxRef = useRef(null);
+  const textareaRef = useRef(null);
+  const scrollIntervalRef = useRef(null);
+
+  // Auto-resize the textarea based on its content
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
+  // Focus the textarea when the user can type
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -70,6 +85,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
+  // Automatically scroll to the latest message
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTo({
@@ -80,23 +96,25 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  const handleSend = async (messageOverride, isSilent = false) => {
+    const handleSend = async (messageOverride, isSilent = false) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
     setIsLoading(true);
 
-    if (message !== "__GET_ONBOARDING__" && !isSilent) {
+    if (!isSilent) {
       setMessages((prev) => [...prev, { type: "user", text: message }]);
     }
     setInput("");
 
+    // Show a temporary "thinking" message
     setMessages((prev) => [
       ...prev,
       { type: "bot", text: "OmiBot is thinking...", loading: true },
     ]);
 
+    // Ensure view stays at the bottom while waiting for response
     scrollIntervalRef.current = setInterval(() => {
       if (chatBoxRef.current) {
         chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -111,16 +129,11 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         credentials: "include",
       });
 
+      // Handle non-streaming responses
       if (!res.body) {
         const data = await res.json();
         const finalAnswer =
           data.answer || "I'm having a little trouble right now.";
-        
-        // Check if this is the onboarding response
-        if (message === "__GET_ONBOARDING__" && finalAnswer.includes("To personalize your experience")) {
-          setShowOnboarding(true);
-        }
-        
         setMessages((prev) => {
           const updated = prev.filter(
             (msg) => msg.text !== "OmiBot is thinking..."
@@ -133,6 +146,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         return;
       }
 
+      // Handle streaming responses
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let botMessage = "";
@@ -154,6 +168,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
 
         fullChunk += decoder.decode(value, { stream: true });
 
+        // Attempt to parse the chunk as JSON, otherwise treat as plain text
         try {
           const parsed = JSON.parse(fullChunk);
           if (parsed.answer) {
@@ -163,6 +178,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           botMessage = fullChunk;
         }
 
+        // Update the last message in the state with the streaming content
         setMessages((prev) => {
           const updated = [...prev];
           const lastIndex = updated.length - 1;
@@ -179,11 +195,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           }
           return updated;
         });
-      }
-
-      // After streaming completes, check if this was onboarding response
-      if (message === "__GET_ONBOARDING__" && botMessage.includes("To personalize your experience")) {
-        setShowOnboarding(true);
       }
     } catch (err) {
       console.error("Fetch error:", err);
@@ -203,6 +214,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
     } finally {
       stopContinuousScrolling();
+      // Finalize the last message state (remove loading/streaming flags)
       setMessages((prev) => {
         const updated = [...prev];
         const lastIndex = updated.length - 1;
@@ -230,20 +242,17 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-      handleSend(trimmed, true);
+      handleSend(trimmed, true); // Send email to backend silently
     } catch (err) {
       console.error("Failed to register email:", err);
     }
   };
 
+  // Fixed the double message bug by removing the manual message addition.
+  // Now it only relies on the backend response.
   const handleEmailReject = () => {
     setSessionDismissed(true);
-    handleSend("no thanks", true);
-  };
-
-  const handleOnboardingSelect = (userType) => {
-    setShowOnboarding(false);
-    handleSend(userType, true);
+    handleSend("no thanks", true); // Silently inform the backend
   };
 
   return (
@@ -278,10 +287,11 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
+        {/* Conditional rendering for the email prompt */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) =>
-            /drop your email|send.*workbook|what'?s your email|join our exclusive newsletter/i.test(m.text)
+            /drop your email|send.*workbook|what'?s your email/i.test(m.text)
           ) && (
             <div className="email-prompt">
               <input
@@ -304,30 +314,36 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {showOnboarding && (
+        {/* Conditional rendering for onboarding vs. main chat input */}
+        {showOnboarding ? (
           <div className="onboarding-buttons">
+             {/* Changed handleSend to be non-silent (isSilent = false) */}
             <button
-              onClick={() => handleOnboardingSelect("Eco Shopper")}
-              disabled={isLoading}
+              onClick={() => {
+                handleSend("Eco Shopper", false);
+                setShowOnboarding(false);
+              }}
             >
               Eco Shopper
             </button>
             <button
-              onClick={() => handleOnboardingSelect("Creator")}
-              disabled={isLoading}
+              onClick={() => {
+                handleSend("Creator", false);
+                setShowOnboarding(false);
+              }}
             >
               Creator
             </button>
             <button
-              onClick={() => handleOnboardingSelect("Brand Owner")}
-              disabled={isLoading}
+              onClick={() => {
+                handleSend("Brand Owner", false);
+                setShowOnboarding(false);
+              }}
             >
               Brand Owner
             </button>
           </div>
-        )}
-
-        {!showOnboarding && (
+        ) : (
           <div className="input-bar">
             <textarea
               ref={textareaRef}
