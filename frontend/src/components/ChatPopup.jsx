@@ -13,6 +13,7 @@ export default function ChatPopup({ onClose }) {
   );
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
@@ -39,6 +40,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           text: "To personalize your experience, please let me know who you are.",
         },
       ]);
+      setShowOnboarding(true); // Show buttons immediately
     }
   }, []);
 
@@ -51,10 +53,10 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
 
   // Focus input
   useEffect(() => {
-    if (textareaRef.current && !showOnboardingButtons) {
+    if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
     }
-  }, [isLoading, messages, showOnboardingButtons]);
+  }, [isLoading, messages, showOnboarding]);
 
   const stopContinuousScrolling = () => {
     if (scrollIntervalRef.current) {
@@ -223,21 +225,11 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   const handleEmailReject = () => {
     setSessionDismissed(true);
     handleSend("no thanks", true);
-    setMessages((prev) => [
-      ...prev,
-      {
-        type: "bot",
-        text: "👍 No worries! We'll keep chatting here.",
-        loading: false,
-      },
-    ]);
   };
 
   const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-  const showOnboardingButtons =
-    lastMessage &&
-    lastMessage.type === "bot" &&
-    lastMessage.text.includes("personalize your experience");
+  // This state is now controlled by the initial useEffect, not the last message
+  // const showOnboardingButtons = ... 
 
   return (
     <div id="chat-popup">
@@ -297,11 +289,32 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {showOnboardingButtons ? (
+        {showOnboarding ? (
           <div className="onboarding-buttons">
-            <button onClick={() => handleSend("Eco Shopper", true)}>Eco Shopper</button>
-            <button onClick={() => handleSend("Creator", true)}>Creator</button>
-            <button onClick={() => handleSend("Brand Owner", true)}>Brand Owner</button>
+            <button
+              onClick={() => {
+                handleSend("Eco Shopper", true);
+                setShowOnboarding(false);
+              }}
+            >
+              Eco Shopper
+            </button>
+            <button
+              onClick={() => {
+                handleSend("Creator", true);
+                setShowOnboarding(false);
+              }}
+            >
+              Creator
+            </button>
+            <button
+              onClick={() => {
+                handleSend("Brand Owner", true);
+                setShowOnboarding(false);
+              }}
+            >
+              Brand Owner
+            </button>
           </div>
         ) : (
           <div className="input-bar">
