@@ -178,14 +178,27 @@ def is_negative_response(text: str) -> bool:
 
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
-    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz']
+    quiz_trigger_keywords = [
+        'routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 
+        'for my skin', 'hair care', 'skin care', 'quiz', 'skincare', 'haircare',
+        'products for', 'recommend products', 'what products', 'which products',
+        'suitable for', 'best for', 'routine for', 'regimen for', 'care routine',
+        'daily routine', 'skin type', 'hair type', 'diagnose', 'analyze',
+        'suggest products', 'product suggestions', 'build routine', 'create regimen',
+        'personalized routine', 'custom routine', 'skin quiz', 'hair quiz',
+        'beauty quiz', 'skin assessment', 'hair assessment', 'skin test', 'hair test',
+        'skin concerns', 'hair concerns', 'skin issues', 'hair issues', 'skin problems',
+        'hair problems', 'improve skin', 'improve hair', 'take quiz', 'start quiz'
+    ]
     if any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
         hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
-        skin_keywords = ['skin', 'face', 'acne', 'wrinkle']
+        skin_keywords = ['skin', 'face', 'acne', 'wrinkle', 'skincare', 'complexion', 'glowing skin', 'skin care']
         has_hair = any(word in cleaned_q for word in hair_keywords)
         has_skin = any(word in cleaned_q for word in skin_keywords)
         if has_hair and not has_skin: return 'hair'
         if has_skin and not has_hair: return 'skin'
+        # If both or unclear, default to skin
+        return 'skin'
     return None
 
 _llm: Optional[ChatVertexAI] = None
@@ -337,7 +350,7 @@ def finish_quiz(session_data: dict) -> str:
         result_type = quiz_data["results_logic"][most_common_answer]
         routine = quiz_data["routines"][result_type]
         session_data.update({"current_quiz_session": None, "quiz_answers": []})
-        return f"Based on your answers, it looks like you have **{result_type}**!\n\nHere’s a simple routine for you:\n{routine}"
+        return f"Based on your answers, it looks like you have **{result_type}**!\n\nHere's a simple routine for you:\n{routine}"
     except Exception as e:
         print(f"[ERROR] in finish_quiz: {e}")
         session_data.update({"current_quiz_session": None, "quiz_answers": []})
@@ -360,9 +373,14 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
     if raw_q == "__GET_ONBOARDING__":
-        session_data['waiting_for_user_classification'] = True
-        answer = "To personalize your experience, please let me know who you are."
-        add_suggestion = False
+        # Only show onboarding if user hasn't been classified yet
+        if not session_data.get('user_type'):
+            session_data['waiting_for_user_classification'] = True
+            answer = "To personalize your experience, please let me know who you are."
+            add_suggestion = False
+        else:
+            # User already classified, just continue normally
+            answer = "Welcome back! How can I help you today?"
 
     elif session_data.get("waiting_for_user_classification"):
         cleaned_q = _clean_text(raw_q)
@@ -371,7 +389,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         if 'eco shopper' in cleaned_q:
             session_data['user_type'] = 'eco_shopper'
             answer = ("🌱 Welcome to Omi Live, your eco living girlie! Ready to explore REAL eco-friendly brands?\n\n"
-                      "Here’s what you’ll get as part of the Omi Fam:\n"
+                      "Here's what you'll get as part of the Omi Fam:\n"
                       "• Our AI Green Rating System to shop transparently\n"
                       "• Exclusive offers & discounts\n"
                       "• Direct interaction with brand owners\n"
@@ -386,7 +404,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Flat fee partnerships\n"
                       "• Expanding your reach with eco-conscious buyers")
             session_data['waiting_for_workbook_confirmation'] = True
-            answer += "\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
+            answer += "\nWe've built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
 
         elif 'brand owner' in cleaned_q:
             session_data['user_type'] = 'brand_owner'
@@ -396,7 +414,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Smart product listing & discovery tools\n"
                       "• Live storytelling that builds trust")
             session_data['waiting_for_workbook_confirmation'] = True
-            answer += "\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
+            answer += "\nWould you like our Live Sales Workbook? It's packed with strategies to boost sales. Want it?"
         
         else: 
             session_data['waiting_for_user_classification'] = True 
@@ -411,7 +429,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif user_type == 'creator':
             answer = "✅ Perfect! Your creator sales workbook is on the way."
         else: # Eco Shopper
-            answer = "You’re all set! We’ll share tips, community insights, and opportunities to feature your brand on Omi Live.\n\nWe’re having your personalized matches brewing. Stay tuned on Omi updates!"
+            answer = "You're all set! We'll share tips, community insights, and opportunities to feature your brand on Omi Live.\n\nWe're having your personalized matches brewing. Stay tuned on Omi updates!"
         add_suggestion = False
     
     elif session_data.get("current_quiz_session"):
@@ -428,6 +446,7 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = start_quiz(session_data, quiz_type)
         else:
             session_data["waiting_for_quiz_start"] = False
+            answer = "No problem! What else can I help you with today?"
         add_suggestion = False
 
     elif session_data.get("waiting_for_workbook_confirmation"):
@@ -523,7 +542,9 @@ def get_rag_response(question: str, user_id: str) -> str:
         add_suggestion = False
     
     if add_suggestion:
-        answer += get_follow_up_suggestion(session_data)
+        suggestion = get_follow_up_suggestion(session_data)
+        if suggestion:
+            answer += suggestion
 
     _session_manager.update_session(user_id, session_data)
     return answer
