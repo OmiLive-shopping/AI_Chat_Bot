@@ -225,11 +225,15 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   const handleEmailReject = () => {
     setSessionDismissed(true);
     handleSend("no thanks", true);
+    setMessages((prev) => [
+      ...prev,
+      {
+        type: "bot",
+        text: "👍 No worries! We'll keep chatting here.",
+        loading: false,
+      },
+    ]);
   };
-
-  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
-  // This state is now controlled by the initial useEffect, not the last message
-  // const showOnboardingButtons = ... 
 
   return (
     <div id="chat-popup">

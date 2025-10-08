@@ -360,7 +360,6 @@ def get_rag_response(question: str, user_id: str) -> str:
     is_negative = is_negative_response(raw_q)
 
     # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
-    # Onboarding is now handled by the first user message, not a special trigger
     if session_data.get('response_count') == 1:
         cleaned_q = _clean_text(raw_q)
         
@@ -395,7 +394,8 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer += "\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
         
         else: 
-            answer = "Please choose a valid option by clicking one of the buttons below."
+            # This should not happen if the frontend sends a valid choice
+            answer = "Please choose a valid option by clicking one of the buttons."
         add_suggestion = False
     
     elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q):
@@ -421,7 +421,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         if is_affirmative:
             quiz_type = session_data.get('quiz_type_pending', 'skin')
             answer = start_quiz(session_data, quiz_type)
-        else: # Any non-affirmative response cancels the pending offer
+        else:
             session_data["waiting_for_quiz_start"] = False
         add_suggestion = False
 
@@ -505,7 +505,7 @@ def get_rag_response(question: str, user_id: str) -> str:
     response_count = session_data.get('response_count', 0)
     
     if not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
-        if user_type == 'eco_shopper' and response_count == 4:
+        if user_type == 'eco_shopper' and response_count == 3:
             should_prompt_email = True
         elif user_type in ['creator', 'brand_owner'] and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
             should_prompt_email = True
