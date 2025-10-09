@@ -136,7 +136,7 @@ class UserSessionManager:
             "quiz_answers": [], "waiting_for_quiz_start": False,
             "waiting_for_rank_confirmation": False, "brand_to_rank": None,
             "waiting_for_workbook_confirmation": False,
-            "waiting_for_user_classification": True, "user_type": None, # UPDATED: Default to True
+            "user_type": None,
             "waiting_for_email": False, "offered_suggestions": [],
             "email_prompt_denied": False, "workbook_sent": False,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
@@ -175,31 +175,17 @@ def is_affirmative_response(text: str) -> bool:
 def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
-
+    
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
-    # UPDATED: Expanded list of trigger keywords
-    quiz_trigger_keywords = [
-        'routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 
-        'for my skin', 'hair care', 'skin care', 'quiz', 'consultation',
-        'recommend', 'recommendation', 'suggest', 'product suggestion', 'what should I use',
-        'build a routine', 'create a routine', 'skin type', 'hair type', 'skin concern', 
-        'hair problem', 'acne', 'dry skin', 'oily skin', 'frizzy hair', 'hair loss', 
-        'dandruff', 'fine lines', 'wrinkles', 'dark spots', 'sensitive skin', 
-        'thinning hair', 'what products are right for me', 'where to start', 'guide me'
-    ]
+    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz', 'acne', 'oily skin', 'dry skin', 'frizzy hair']
     if any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
-        # UPDATED: Expanded lists for better detection
-        hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare', 'frizzy', 'dandruff', 'thinning', 'split ends']
-        skin_keywords = ['skin', 'face', 'acne', 'wrinkle', 'pores', 'dryness', 'oily', 'blemish', 'complexion', 'dark spots', 'serum', 'moisturizer', 'cleanser']
-        
+        hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
+        skin_keywords = ['skin', 'face', 'acne', 'wrinkle']
         has_hair = any(word in cleaned_q for word in hair_keywords)
         has_skin = any(word in cleaned_q for word in skin_keywords)
-        
-        # UPDATED: Logic to handle ambiguity by defaulting to skin
-        if has_skin and not has_hair: return 'skin'
         if has_hair and not has_skin: return 'hair'
-        if has_skin and has_hair: return 'skin' # Default to skin if both are mentioned
+        if has_skin and not has_hair: return 'skin'
     return None
 
 _llm: Optional[ChatVertexAI] = None
@@ -272,9 +258,9 @@ def get_brand_ranking_single(brand_name: str) -> str:
     breakdown_cols = [c for c in df.columns if c not in ['brand_name', 'brand_key', 'final_score']]
     breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
 
-    response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
+    response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**"
     if breakdown:
-        response += "\n".join(breakdown)
+        response += "\n" + "\n".join(breakdown)
     return response
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
@@ -295,16 +281,17 @@ def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
 
 def respond_with_brand_info() -> str:
     df = get_brand_df()
-    if df.empty or 'final_score' not in df.columns:
-        return "I don't have brand ranking information right now."
+    if df.empty:
+        return "I don't have brand information right now."
     
-    top_ranked = df.sort_values(by='final_score', ascending=False).head(5)
+    top_brands = df.sort_values(by='final_score', ascending=False).head(5)
+    
     response_lines = ["Sure! Here are some of the top eco-friendly brands we've ranked on a scale of 30:\n"]
-    for i, row in enumerate(top_ranked.itertuples(), 1):
-        response_lines.append(f"{i}. **{row.brand_name}** (Score: {row.final_score})")
+    for _, row in top_brands.iterrows():
+        response_lines.append(f"- **{row['brand_name']}** (Score: {row['final_score']}/30)")
         
     all_brands = sorted(df["brand_name"].dropna().unique())
-    response_lines.append("\nI also track: " + ", ".join(all_brands))
+    response_lines.append("\nI also track all of these brands: " + ", ".join(all_brands))
     
     return "\n".join(response_lines)
     
@@ -373,11 +360,8 @@ def get_rag_response(question: str, user_id: str) -> str:
     is_negative = is_negative_response(raw_q)
 
     # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
-    # REMOVED: __GET_ONBOARDING__ logic is now handled by the frontend and default session state.
-    
-    if session_data.get("waiting_for_user_classification"):
+    if session_data.get('response_count') == 1:
         cleaned_q = _clean_text(raw_q)
-        session_data['waiting_for_user_classification'] = False
         
         if 'eco shopper' in cleaned_q:
             session_data['user_type'] = 'eco_shopper'
@@ -397,7 +381,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Flat fee partnerships\n"
                       "• Expanding your reach with eco-conscious buyers")
             session_data['waiting_for_workbook_confirmation'] = True
-            answer += "\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
+            answer += "\n\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
 
         elif 'brand owner' in cleaned_q:
             session_data['user_type'] = 'brand_owner'
@@ -407,10 +391,9 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Smart product listing & discovery tools\n"
                       "• Live storytelling that builds trust")
             session_data['waiting_for_workbook_confirmation'] = True
-            answer += "\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
+            answer += "\n\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
         
         else: 
-            session_data['waiting_for_user_classification'] = True 
             answer = "Please choose a valid option by clicking one of the buttons below."
         add_suggestion = False
     
@@ -481,7 +464,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         
         cleaned_q = _clean_text(raw_q)
         
-        # --- High-priority keyword intents for brands ---
+        # --- High-priority keyword intents ---
         if "rank brand" in cleaned_q or "brand ranking" in cleaned_q or "suggest brand" in cleaned_q:
             answer = respond_with_brand_info()
         elif "list brand" in cleaned_q:
@@ -529,7 +512,7 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     if should_prompt_email:
         session_data['waiting_for_email'] = True
-        answer += ("\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+        answer += ("\n\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                    "What's your email? 🌱")
         add_suggestion = False
     

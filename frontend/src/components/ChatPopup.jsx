@@ -1,40 +1,31 @@
+// frontend/src/components/ChatPopup.jsx
 import React, { useState, useRef, useEffect } from "react";
+import ChatMessage from "./ChatMessage";
 
-// The BASE_URL for the backend API
 const BASE_URL = "https://omi-backend-355024965259.us-central1.run.app";
 
-// Inlined ChatMessage component to resolve the import error.
-function ChatMessage({ type, text, loading }) {
-  const isBot = type === 'bot';
-  // Dynamically assign CSS classes based on the message type (user or bot)
-  const messageClass = isBot ? 'bot-message' : 'user-message';
-
-  // Render the message text, preserving line breaks
-  const renderText = () => {
-    // Using a regex to split by newlines and wrapping each line in a span
-    // This is a common pattern for rendering text with preserved formatting in React
-    return text.split(/(\n)/).map((item, index) =>
-      item.match(/\n/) ? <br key={index} /> : <span key={index}>{item}</span>
-    );
-  };
-
-  return (
-    <div className={`chat-message ${messageClass}`}>
-      <div className="message-content">
-        {renderText()}
-        {loading && <span className="loading-dots"></span>}
-      </div>
-    </div>
-  );
-}
-
-
 export default function ChatPopup({ onClose }) {
-  // Set initial state to include both welcome messages from the start.
-  const [messages, setMessages] = useState([
-    {
-      type: "bot",
-      text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [email, setEmail] = useState(localStorage.getItem("userEmail") || "");
+  const [emailSubmitted, setEmailSubmitted] = useState(
+    !!localStorage.getItem("userEmail")
+  );
+  const [sessionDismissed, setSessionDismissed] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  const chatBoxRef = useRef(null);
+  const textareaRef = useRef(null);
+  const scrollIntervalRef = useRef(null);
+
+  // --- UPDATED: Shows both greeting and onboarding question instantly ---
+  useEffect(() => {
+    if (messages.length === 0) {
+      setMessages([
+        {
+          type: "bot",
+          text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨
 I'm here to help you discover sustainable brands, learn eco tips, and master live shopping - whether you're a conscious shopper or a creator ready to go live!
 Ask me about:
 🛍️ Sustainable shopping & green living tips
@@ -43,35 +34,24 @@ Ask me about:
 🎯 Creator resources - Get our free step-by-step live shopping workbook!
 
 Ready to chat about conscious commerce? What can I help you with today? 🎉`,
-    },
-    {
-      type: "bot",
-      text: "To personalize your experience, please let me know who you are."
+        },
+        {
+          type: "bot",
+          text: "To personalize your experience, please let me know who you are.",
+        },
+      ]);
+      setShowOnboarding(true); // Show buttons immediately
     }
-  ]);
+  }, []);
 
-  const [input, setInput] = useState("");
-  const [email, setEmail] = useState(localStorage.getItem("userEmail") || "");
-  const [emailSubmitted, setEmailSubmitted] = useState(
-    !!localStorage.getItem("userEmail")
-  );
-  const [sessionDismissed, setSessionDismissed] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  // Default to true to show onboarding buttons immediately.
-  const [showOnboarding, setShowOnboarding] = useState(true);
-
-  const chatBoxRef = useRef(null);
-  const textareaRef = useRef(null);
-  const scrollIntervalRef = useRef(null);
-
-  // Auto-resize the textarea based on its content
+  // Auto-resize input
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
-  // Focus the textarea when the user can type
+  // Focus input
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -85,18 +65,19 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // Automatically scroll to the latest message
+  // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
-      chatBoxRef.current.scrollTo({
-        top: chatBoxRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    }
+        chatBoxRef.current.scrollTo({
+          top: chatBoxRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      }
     return () => stopContinuousScrolling();
   }, [messages]);
 
-    const handleSend = async (messageOverride, isSilent = false) => {
+
+  const handleSend = async (messageOverride, isSilent = false) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
@@ -108,13 +89,11 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
     setInput("");
 
-    // Show a temporary "thinking" message
     setMessages((prev) => [
       ...prev,
       { type: "bot", text: "OmiBot is thinking...", loading: true },
     ]);
 
-    // Ensure view stays at the bottom while waiting for response
     scrollIntervalRef.current = setInterval(() => {
       if (chatBoxRef.current) {
         chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -129,7 +108,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         credentials: "include",
       });
 
-      // Handle non-streaming responses
       if (!res.body) {
         const data = await res.json();
         const finalAnswer =
@@ -146,7 +124,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         return;
       }
 
-      // Handle streaming responses
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let botMessage = "";
@@ -167,18 +144,16 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         if (done) break;
 
         fullChunk += decoder.decode(value, { stream: true });
-
-        // Attempt to parse the chunk as JSON, otherwise treat as plain text
+        
         try {
           const parsed = JSON.parse(fullChunk);
-          if (parsed.answer) {
-            botMessage = parsed.answer;
+          if(parsed.answer) {
+             botMessage = parsed.answer;
           }
-        } catch (e) {
+        } catch(e) {
           botMessage = fullChunk;
         }
 
-        // Update the last message in the state with the streaming content
         setMessages((prev) => {
           const updated = [...prev];
           const lastIndex = updated.length - 1;
@@ -214,7 +189,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
     } finally {
       stopContinuousScrolling();
-      // Finalize the last message state (remove loading/streaming flags)
       setMessages((prev) => {
         const updated = [...prev];
         const lastIndex = updated.length - 1;
@@ -242,17 +216,18 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-      handleSend(trimmed, true); // Send email to backend silently
+      handleSend(trimmed, true);
     } catch (err) {
       console.error("Failed to register email:", err);
     }
   };
 
-  // Fixed the double message bug by removing the manual message addition.
-  // Now it only relies on the backend response.
+  // --- UPDATED: Fixes the duplicate "No worries!" message ---
   const handleEmailReject = () => {
     setSessionDismissed(true);
-    handleSend("no thanks", true); // Silently inform the backend
+    // Silently inform the backend. The backend will now be responsible
+    // for sending the "No worries!" message.
+    handleSend("no thanks", true); 
   };
 
   return (
@@ -287,7 +262,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
-        {/* Conditional rendering for the email prompt */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) =>
@@ -314,13 +288,11 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {/* Conditional rendering for onboarding vs. main chat input */}
         {showOnboarding ? (
           <div className="onboarding-buttons">
-             {/* Changed handleSend to be non-silent (isSilent = false) */}
             <button
               onClick={() => {
-                handleSend("Eco Shopper", false);
+                handleSend("Eco Shopper", true);
                 setShowOnboarding(false);
               }}
             >
@@ -328,7 +300,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </button>
             <button
               onClick={() => {
-                handleSend("Creator", false);
+                handleSend("Creator", true);
                 setShowOnboarding(false);
               }}
             >
@@ -336,7 +308,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </button>
             <button
               onClick={() => {
-                handleSend("Brand Owner", false);
+                handleSend("Brand Owner", true);
                 setShowOnboarding(false);
               }}
             >
