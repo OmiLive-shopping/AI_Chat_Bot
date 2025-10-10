@@ -178,11 +178,7 @@ def is_negative_response(text: str) -> bool:
     
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
-    quiz_trigger_keywords = [
-        'routine', 'regimen', 'help with my', 'my hair', 'my skin', 
-        'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz',
-        'acne', 'oily skin', 'dry skin', 'frizzy hair', 'dandruff', 'sensitive skin'
-    ]
+    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz', 'acne', 'oily skin', 'dry skin', 'frizzy hair']
     if any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
         hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare', 'frizzy']
         skin_keywords = ['skin', 'face', 'acne', 'wrinkle', 'oily', 'dry']
@@ -474,7 +470,6 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif "list brand" in cleaned_q:
              answer = respond_with_brand_info()
         else:
-            # Fallback to other logic
             quiz_type = detect_routine_intent(raw_q)
             if quiz_type:
                 answer = offer_quiz(session_data, quiz_type)
