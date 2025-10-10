@@ -18,7 +18,6 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // initial greeting + personalization message
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -34,23 +33,28 @@ Ask me about:
 
 Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         },
-        {
-          type: "bot",
-          text: `To personalize your experience, please let me know who you are.`,
-        },
       ]);
-      setShowOnboarding(true);
     }
   }, []);
 
-  // textarea resize
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    if (
+      messages.length === 1 &&
+      lastMessage?.type === "bot" &&
+      lastMessage.text.includes("What can I help you with today?")
+    ) {
+      handleSend("__GET_ONBOARDING__", true);
+      setShowOnboarding(true);
+    }
+  }, [messages]);
+
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
-  // focus textarea automatically when onboarding isn't shown
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -64,7 +68,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // auto scroll to latest message
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTo({
@@ -75,7 +78,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  const handleSend = async (messageOverride, isSilent = false) => {
+    const handleSend = async (messageOverride, isSilent = false) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
@@ -221,7 +224,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   };
 
   const handleEmailReject = () => {
-    if (sessionDismissed) return; // avoid duplicate “No worries” message
     setSessionDismissed(true);
     handleSend("no thanks", true);
     setMessages((prev) => [

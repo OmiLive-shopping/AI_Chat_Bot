@@ -1,4 +1,4 @@
-# rag_chain.py (Full and Final Version - Updated for Quiz Keywords & Duplicate Fix)
+# rag_chain.py (Full and Final Version - Cloud Ready)
 import os
 import re
 import difflib
@@ -58,8 +58,8 @@ except Exception as e:
     db = None
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
-BRAND_CSV = os.path.join(DATA_DIR, "cleaned_brand_metrics.csv")
-WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx"
+BRAND_CSV = os.path.join(DATA_DIR, "cleaned_brand_metrics.csv") 
+WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx" 
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
 VECTORSTORE_DIR = os.environ.get('VECTORSTORE_DIR', os.path.join(DATA_DIR, "omi_index"))
@@ -145,8 +145,7 @@ class UserSessionManager:
 _session_manager = UserSessionManager(db)
 
 def get_user_id(session_info: Any) -> str:
-    if isinstance(session_info, str):
-        return session_info
+    if isinstance(session_info, str): return session_info
     if isinstance(session_info, dict):
         if "user_id" not in session_info:
             session_info["user_id"] = os.urandom(16).hex()
@@ -166,10 +165,7 @@ def _make_key(text: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-AFFIRMATIONS = {
-    "sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please",
-    "start", "start quiz", "we can start", "we can", "sure", "yup", "yep", "of course", "ofcourse"
-}
+AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start", "we can", "sure", "yup", "yep", "of course", "ofcourse"}
 NEGATIONS = {"no", "nope", "no thanks", "i don't", "no i don't"}
 
 def is_affirmative_response(text: str) -> bool:
@@ -180,58 +176,17 @@ def is_negative_response(text: str) -> bool:
     cleaned = _clean_text(text)
     return any(cleaned == n or cleaned.startswith(n + " ") for n in NEGATIONS)
 
-# --- Quiz Intent Detection (Updated with Expanded Keywords) ---
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
-
-    quiz_trigger_keywords = [
-        'routine', 'regimen', 'help with', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin',
-        'hair care', 'skin care', 'skincare', 'haircare', 'quiz', 'skin quiz', 'hair quiz', 'routine for',
-        'best routine', 'what routine', 'recommend a routine', 'recommend routine', 'help me with', 'need routine',
-        'suggest a routine', 'suggest routine', 'regimen for', 'care for my', 'hair routine', 'skin routine',
-        'face routine', 'face care', 'scalp care', 'scalp issues', 'fix my hair', 'fix my scalp', 'hair problems',
-        'dry hair', 'oily hair', 'frizzy hair', 'damaged hair', 'hair growth', 'hair loss', 'split ends',
-        'dry skin', 'oily skin', 'combination skin', 'sensitive skin', 'skin type', 'skin issues', 'acne routine',
-        'skin problems', 'face care', 'face wash', 'moisturizer for skin', 'serum for skin', 'skin glow',
-        'skincare quiz', 'haircare quiz'
-    ]
-
-    if not any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
-        return None
-
-    hair_keywords = [
-        'hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare', 'split', 'split ends',
-        'dandruff', 'frizz', 'hairfall', 'hair fall', 'hair loss', 'growth', 'alopecia',
-        'color', 'dye', 'perm', 'straighten', 'styling', 'oily scalp', 'dry scalp', 'hair oil', 'serum for hair'
-    ]
-
-    skin_keywords = [
-        'skin', 'face', 'acne', 'pimple', 'blemish', 'wrinkle', 'fine line', 'moistur', 'dry', 'oily',
-        'combination', 'sensitive', 'rosacea', 'eczema', 'psoriasis', 'complexion', 'tone',
-        'skincare', 'serum', 'toner', 'cleanser', 'spf', 'sunscreen', 'blackhead', 'whitehead',
-        'dark spots', 'hyperpigment', 'hyperpigmentation', 'mask', 'exfoliate', 'exfoliation'
-    ]
-
-    has_hair = any(word in cleaned_q for word in hair_keywords)
-    has_skin = any(word in cleaned_q for word in skin_keywords)
-
-    if has_skin:
-        return 'skin'
-    if has_hair:
-        return 'hair'
-
+    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz']
+    if any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
+        hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
+        skin_keywords = ['skin', 'face', 'acne', 'wrinkle']
+        has_hair = any(word in cleaned_q for word in hair_keywords)
+        has_skin = any(word in cleaned_q for word in skin_keywords)
+        if has_hair and not has_skin: return 'hair'
+        if has_skin and not has_hair: return 'skin'
     return None
-
-# =========================
-# (The rest of the file remains identical)
-# =========================
-# -- Everything below this line (LLM setup, RAG, brand logic, quiz logic, and main get_rag_response)
-# -- stays exactly as your version, except one duplicate fix in the "no worries" section.
-# -- Scroll down to see that block updated:
-
-# ... (keep your code identical down to get_rag_response) ...
-
-# Inside get_rag_response(), replace this small block ↓
 
 _llm: Optional[ChatVertexAI] = None
 _retriever = None
@@ -495,14 +450,11 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "Got it, no problem! How else can I help?"
         session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
         add_suggestion = False
-
+        
     elif is_negative_response(raw_q) and session_data.get('waiting_for_email'):
         session_data['email_prompt_denied'] = True
         session_data['waiting_for_email'] = False
-        # ✅ Fixed duplicate message: only show once
-        if not session_data.get("shown_no_worries"):
-            answer = "👍 No worries! We'll keep chatting here."
-            session_data["shown_no_worries"] = True
+        answer = "👍 No worries! We'll keep chatting here."
         add_suggestion = False
 
     # --- BLOCK B: If no stateful response, handle new query ---
