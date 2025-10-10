@@ -1,3 +1,4 @@
+// frontend/src/components/ChatPopup.jsx
 import React, { useState, useRef, useEffect } from "react";
 import ChatMessage from "./ChatMessage";
 
@@ -18,6 +19,7 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
+  // --- UPDATED: Shows both greeting and onboarding question instantly ---
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -33,28 +35,23 @@ Ask me about:
 
 Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         },
+        {
+          type: "bot",
+          text: "To personalize your experience, please let me know who you are.",
+        },
       ]);
+      setShowOnboarding(true); // Show buttons immediately
     }
   }, []);
 
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (
-      messages.length === 1 &&
-      lastMessage?.type === "bot" &&
-      lastMessage.text.includes("What can I help you with today?")
-    ) {
-      handleSend("__GET_ONBOARDING__", true);
-      setShowOnboarding(true);
-    }
-  }, [messages]);
-
+  // Auto-resize input
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
+  // Focus input
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -68,24 +65,26 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
+  // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
-      chatBoxRef.current.scrollTo({
-        top: chatBoxRef.current.scrollHeight,
-        behavior: "smooth",
-      });
-    }
+        chatBoxRef.current.scrollTo({
+          top: chatBoxRef.current.scrollHeight,
+          behavior: "smooth",
+        });
+      }
     return () => stopContinuousScrolling();
   }, [messages]);
 
-    const handleSend = async (messageOverride, isSilent = false) => {
+
+  const handleSend = async (messageOverride, isSilent = false) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
     setIsLoading(true);
 
-    if (message !== "__GET_ONBOARDING__" && !isSilent) {
+    if (!isSilent) {
       setMessages((prev) => [...prev, { type: "user", text: message }]);
     }
     setInput("");
@@ -145,13 +144,13 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         if (done) break;
 
         fullChunk += decoder.decode(value, { stream: true });
-
+        
         try {
           const parsed = JSON.parse(fullChunk);
-          if (parsed.answer) {
-            botMessage = parsed.answer;
+          if(parsed.answer) {
+             botMessage = parsed.answer;
           }
-        } catch (e) {
+        } catch(e) {
           botMessage = fullChunk;
         }
 
@@ -223,17 +222,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
+  // --- UPDATED: Fixes the duplicate "No worries!" message ---
   const handleEmailReject = () => {
     setSessionDismissed(true);
-    handleSend("no thanks", true);
-    setMessages((prev) => [
-      ...prev,
-      {
-        type: "bot",
-        text: "👍 No worries! We'll keep chatting here.",
-        loading: false,
-      },
-    ]);
+    // Silently inform the backend. The backend will now be responsible
+    // for sending the "No worries!" message.
+    handleSend("no thanks", true); 
   };
 
   return (
