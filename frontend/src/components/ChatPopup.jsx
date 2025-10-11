@@ -18,29 +18,33 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Initial greeting: onboarding prompt will be shown from frontend
+  // Extended intro greeting shown from frontend
+  const initialGreeting = `I'm here to help you discover sustainable brands, learn eco tips, and master live shopping — whether you're a conscious shopper or a creator ready to go live! 🌿💫
+
+Ask me about:
+🛍️ Sustainable shopping & green living tips  
+📱 Live shopping experiences & authentic brand connections  
+🌿 Eco-friendly brands & sustainability insights  
+🎯 Creator resources — Get our free step-by-step live shopping workbook!
+
+Ready to chat about conscious commerce? What can I help you with today? 🎉`;
+
+  // Load intro and personalization
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
         {
           type: "bot",
-          text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨
-I can help you discover sustainable brands, learn eco tips, and support creators. Ready to chat?`,
+          text: initialGreeting,
+        },
+        {
+          type: "bot",
+          text: "To personalize your experience, please let me know who you are.",
         },
       ]);
-    }
-  }, []);
-
-  // When the first greeting appears, trigger onboarding backend flag and show frontend onboarding UI
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (messages.length === 1 && lastMessage?.type === "bot") {
-      // send onboarding ping to backend but suppress the local "thinking" placeholder only for this ping
-      handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
       setShowOnboarding(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages.length]);
+  }, []);
 
   useEffect(() => {
     if (!textareaRef.current) return;
@@ -71,18 +75,11 @@ I can help you discover sustainable brands, learn eco tips, and support creators
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  /**
-   * handleSend
-   * messageOverride: string or undefined -> message to send
-   * isSilent: when true we do not add a user message to the chat UI (used for onboarding & email submits)
-   * opts: { suppressThinking: boolean } to avoid adding the "OmiBot is thinking..." placeholder for some pings
-   */
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
-    // Special-case onboarding ping: still call backend to set session state, but avoid local placeholders
     const isOnboardingPing = message === "__GET_ONBOARDING__";
 
     setIsLoading(true);
@@ -92,14 +89,11 @@ I can help you discover sustainable brands, learn eco tips, and support creators
     }
     setInput("");
 
-    // Only add the thinking placeholder if not suppressed and this is not the special onboarding ping
     if (!opts.suppressThinking && !isOnboardingPing) {
       setMessages((prev) => [
         ...prev,
         { type: "bot", text: "OmiBot is thinking...", loading: true },
       ]);
-
-      // start auto-scroll
       scrollIntervalRef.current = setInterval(() => {
         if (chatBoxRef.current) {
           chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -115,11 +109,8 @@ I can help you discover sustainable brands, learn eco tips, and support creators
         credentials: "include",
       });
 
-      // If onboarding ping (backend returns empty string intentionally), handle gracefully
       if (isOnboardingPing) {
-        // backend sets session flag and returns empty; we don't need to show any immediate reply
         setShowOnboarding(true);
-        // ensure we stop loading state because we suppressed thinking for onboarding
         setIsLoading(false);
         return;
       }
@@ -144,6 +135,7 @@ I can help you discover sustainable brands, learn eco tips, and support creators
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let botMessage = "";
+      let fullChunk = "";
 
       setMessages((prev) => {
         const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
@@ -153,7 +145,6 @@ I can help you discover sustainable brands, learn eco tips, and support creators
         ];
       });
 
-      let fullChunk = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -161,17 +152,11 @@ I can help you discover sustainable brands, learn eco tips, and support creators
         fullChunk += decoder.decode(value, { stream: true });
 
         try {
-          // API may stream newline-separated JSON or raw text; try JSON parse first
           const parsed = JSON.parse(fullChunk);
-          if (parsed.answer) {
-            botMessage = parsed.answer;
-          } else if (parsed.data) {
-            botMessage = parsed.data;
-          } else {
-            // fallback to fullChunk content
-            botMessage = fullChunk;
-          }
-        } catch (e) {
+          if (parsed.answer) botMessage = parsed.answer;
+          else if (parsed.data) botMessage = parsed.data;
+          else botMessage = fullChunk;
+        } catch {
           botMessage = fullChunk;
         }
 
@@ -237,8 +222,6 @@ I can help you discover sustainable brands, learn eco tips, and support creators
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-      // send email value silently to backend so it can store and reply if needed
-      // ensure thinking placeholder is shown for the backend response
       handleSend(trimmed, true, { suppressThinking: false });
     } catch (err) {
       console.error("Failed to register email:", err);
@@ -246,11 +229,7 @@ I can help you discover sustainable brands, learn eco tips, and support creators
   };
 
   const handleEmailReject = () => {
-    // Hide the email UI locally and send the negative response silently to backend.
-    // Do NOT append the "No worries!" message locally to avoid duplication:
-    // backend will respond with "👍 No worries! We'll keep chatting here." and we will render it.
     setSessionDismissed(true);
-    // ensure thinking placeholder is shown for the backend reply
     handleSend("no thanks", true, { suppressThinking: false });
   };
 
@@ -286,7 +265,6 @@ I can help you discover sustainable brands, learn eco tips, and support creators
           ))}
         </div>
 
-        {/* Email prompt UI (unchanged logic and regex) */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) =>
@@ -313,7 +291,6 @@ I can help you discover sustainable brands, learn eco tips, and support creators
             </div>
           )}
 
-        {/* Onboarding UI: frontend shows "To personalize..." and buttons */}
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-prompt">
@@ -322,7 +299,6 @@ I can help you discover sustainable brands, learn eco tips, and support creators
             <div className="onboarding-buttons">
               <button
                 onClick={() => {
-                  // send selection silently but show thinking placeholder for backend reply
                   handleSend("Eco Shopper", true, { suppressThinking: false });
                   setShowOnboarding(false);
                 }}
