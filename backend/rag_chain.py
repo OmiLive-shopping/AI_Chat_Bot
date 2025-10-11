@@ -166,7 +166,7 @@ def _make_key(text: str) -> str:
     return s
 
 AFFIRMATIONS = {"sounds good", "awesome", "perfect", "great", "okay", "ok", "yes", "please", "yes please", "start", "start quiz", "we can start", "we can", "sure", "yup", "yep", "of course", "ofcourse"}
-NEGATIONS = {"no", "nope", "no thanks", "i don't", "no i don't"}
+NEGATIONS = {"no", "nope", "no thanks", "i don't", "no i don't", "nah"}
 
 def is_affirmative_response(text: str) -> bool:
     cleaned = _clean_text(text)
@@ -178,14 +178,50 @@ def is_negative_response(text: str) -> bool:
 
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
-    quiz_trigger_keywords = ['routine', 'regimen', 'help with my', 'my hair', 'my skin', 'for my hair', 'for my skin', 'hair care', 'skin care', 'quiz']
+
+    # Extended set of triggers for more robust detection (skin + hair)
+    quiz_trigger_keywords = [
+        # generic triggers
+        'routine', 'regimen', 'help with my', 'help with', 'quiz', 'take quiz', 'begin quiz',
+        # skin-related triggers
+        'skin', 'skin care', 'skincare', 'skin routine', 'face', 'face care', 'moisturizer',
+        'serum', 'toner', 'acne', 'blemish', 'pimple', 'dry skin', 'oily skin', 'combination skin',
+        'sensitive skin', 'wrinkle', 'aging', 'anti aging', 'sunscreen', 'spf',
+        # hair-related triggers
+        'hair', 'hair care', 'haircare', 'hair routine', 'hair regimen', 'shampoo', 'conditioner',
+        'split ends', 'frizz', 'hair loss', 'dandruff', 'scalp', 'styling', 'curly', 'curly hair',
+        'straight hair', 'color treated', 'chemically treated', 'leave in', 'hair mask', 'hair oil'
+    ]
+
+    # Fine-grained keyword lists to classify hair vs skin when possible
+    hair_keywords = [
+        'hair', 'shampoo', 'conditioner', 'curl', 'curly', 'straight', 'scalp', 'dandruff',
+        'split ends', 'frizz', 'styling', 'haircare', 'hair care', 'hair loss', 'color treated',
+        'leave in', 'hair mask', 'hair oil'
+    ]
+    skin_keywords = [
+        'skin', 'skincare', 'skin care', 'face', 'moistur', 'serum', 'acne', 'blemish', 'pimple',
+        'dry skin', 'oily skin', 'combination', 'sensitive', 'wrinkle', 'aging', 'sunscreen', 'spf'
+    ]
+
+    # If any trigger phrase exists in the cleaned query, proceed to classify
     if any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
-        hair_keywords = ['hair', 'shampoo', 'conditioner', 'curl', 'scalp', 'haircare']
-        skin_keywords = ['skin', 'face', 'acne', 'wrinkle']
         has_hair = any(word in cleaned_q for word in hair_keywords)
         has_skin = any(word in cleaned_q for word in skin_keywords)
-        if has_hair and not has_skin: return 'hair'
-        if has_skin and not has_hair: return 'skin'
+
+        # prefer explicit classification
+        if has_hair and not has_skin:
+            return 'hair'
+        if has_skin and not has_hair:
+            return 'skin'
+        # if both or neither, choose fallback based on presence of words
+        # if both present, prioritize skin if 'skin' appears explicitly
+        if 'skin' in cleaned_q or 'skincare' in cleaned_q or 'face' in cleaned_q:
+            return 'skin'
+        if 'hair' in cleaned_q or 'shampoo' in cleaned_q or 'conditioner' in cleaned_q:
+            return 'hair'
+        # fallback: if generic 'routine' or 'regimen' assume skin (safer default for skincare-focused product flow)
+        return 'skin'
     return None
 
 _llm: Optional[ChatVertexAI] = None
@@ -359,16 +395,20 @@ def get_rag_response(question: str, user_id: str) -> str:
     is_negative = is_negative_response(raw_q)
 
     # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
+    # NOTE: onboarding trigger is intended to be handled by frontend UI.
+    # We still set the session flag so backend knows to expect the next classification input,
+    # but we intentionally do NOT return the onboarding message from backend (frontend will).
     if raw_q == "__GET_ONBOARDING__":
         session_data['waiting_for_user_classification'] = True
-        answer = "To personalize your experience, please let me know who you are."
-        add_suggestion = False
+        # persist state immediately and return empty response (frontend will display the message)
+        _session_manager.update_session(user_id, session_data)
+        return ""
 
     elif session_data.get("waiting_for_user_classification"):
         cleaned_q = _clean_text(raw_q)
         session_data['waiting_for_user_classification'] = False
         
-        if 'eco shopper' in cleaned_q:
+        if 'eco shopper' in cleaned_q or 'ecoshopper' in cleaned_q or 'eco_shopper' in cleaned_q:
             session_data['user_type'] = 'eco_shopper'
             answer = ("🌱 Welcome to Omi Live, your eco living girlie! Ready to explore REAL eco-friendly brands?\n\n"
                       "Here’s what you’ll get as part of the Omi Fam:\n"
@@ -388,7 +428,7 @@ def get_rag_response(question: str, user_id: str) -> str:
             session_data['waiting_for_workbook_confirmation'] = True
             answer += "\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
 
-        elif 'brand owner' in cleaned_q:
+        elif 'brand owner' in cleaned_q or 'brandowner' in cleaned_q or 'brand_owner' in cleaned_q:
             session_data['user_type'] = 'brand_owner'
             answer = ("👋 Hi! Welcome to Omi Live — the AI-powered retail tech for eco-friendly brands. Are you a brand owner looking to grow sales?\n\n"
                       "We help brands like yours achieve 20% sales conversion through:\n"
@@ -428,6 +468,8 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = start_quiz(session_data, quiz_type)
         else:
             session_data["waiting_for_quiz_start"] = False
+            # give a neutral single-line response when user declines
+            answer = "No problem — if you change your mind, I can start the quiz anytime."
         add_suggestion = False
 
     elif session_data.get("waiting_for_workbook_confirmation"):
@@ -452,6 +494,7 @@ def get_rag_response(question: str, user_id: str) -> str:
         add_suggestion = False
         
     elif is_negative_response(raw_q) and session_data.get('waiting_for_email'):
+        # user declined to provide email — make this a single, guarded response and mark state
         session_data['email_prompt_denied'] = True
         session_data['waiting_for_email'] = False
         answer = "👍 No worries! We'll keep chatting here."
@@ -518,12 +561,16 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     if should_prompt_email:
         session_data['waiting_for_email'] = True
+        # ensure we don't duplicate similar email prompt strings elsewhere
         answer += ("\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                    "What's your email? 🌱")
         add_suggestion = False
     
     if add_suggestion:
-        answer += get_follow_up_suggestion(session_data)
+        # Avoid appending suggestions that duplicate main messages or produce duplicate "no worries" lines.
+        follow = get_follow_up_suggestion(session_data)
+        if follow and follow.strip() not in answer:
+            answer += follow
 
     _session_manager.update_session(user_id, session_data)
     return answer
