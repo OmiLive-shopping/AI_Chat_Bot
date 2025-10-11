@@ -18,7 +18,7 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // --- UPDATED: Shows both greeting and onboarding question instantly ---
+  // Initial greeting: onboarding prompt will be shown from frontend
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -43,14 +43,23 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   }, []);
 
-  // Auto-resize input
+  // When the first greeting appears, trigger onboarding backend flag and show frontend onboarding UI
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    if (messages.length === 1 && lastMessage?.type === "bot") {
+      // send onboarding ping to backend but suppress the local "thinking" placeholder only for this ping
+      handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
+      setShowOnboarding(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
+
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
   }, [input]);
 
-  // Focus input
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -64,40 +73,51 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // Auto-scroll
   useEffect(() => {
     if (chatBoxRef.current) {
-        chatBoxRef.current.scrollTo({
-          top: chatBoxRef.current.scrollHeight,
-          behavior: "smooth",
-        });
-      }
+      chatBoxRef.current.scrollTo({
+        top: chatBoxRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
     return () => stopContinuousScrolling();
   }, [messages]);
 
-
-  const handleSend = async (messageOverride, isSilent = false) => {
+  /**
+   * handleSend
+   * messageOverride: string or undefined -> message to send
+   * isSilent: when true we do not add a user message to the chat UI (used for onboarding & email submits)
+   * opts: { suppressThinking: boolean } to avoid adding the "OmiBot is thinking..." placeholder for some pings
+   */
+  const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
+    // Special-case onboarding ping: still call backend to set session state, but avoid local placeholders
+    const isOnboardingPing = message === "__GET_ONBOARDING__";
+
     setIsLoading(true);
 
-    if (!isSilent) {
+    if (!isSilent && !isOnboardingPing) {
       setMessages((prev) => [...prev, { type: "user", text: message }]);
     }
     setInput("");
 
-    setMessages((prev) => [
-      ...prev,
-      { type: "bot", text: "OmiBot is thinking...", loading: true },
-    ]);
+    // Only add the thinking placeholder if not suppressed and this is not the special onboarding ping
+    if (!opts.suppressThinking && !isOnboardingPing) {
+      setMessages((prev) => [
+        ...prev,
+        { type: "bot", text: "OmiBot is thinking...", loading: true },
+      ]);
 
-    scrollIntervalRef.current = setInterval(() => {
-      if (chatBoxRef.current) {
-        chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-      }
-    }, 100);
+      // start auto-scroll
+      scrollIntervalRef.current = setInterval(() => {
+        if (chatBoxRef.current) {
+          chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+        }
+      }, 100);
+    }
 
     try {
       const res = await fetch(`${BASE_URL}/chat`, {
@@ -107,10 +127,20 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         credentials: "include",
       });
 
+      // If onboarding ping (backend returns empty string intentionally), handle gracefully
+      if (isOnboardingPing) {
+        // backend sets session flag and returns empty; we don't need to show any immediate reply
+        setShowOnboarding(true);
+        // ensure we stop loading state because we suppressed thinking for onboarding
+        setIsLoading(false);
+        return;
+      }
+
       if (!res.body) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         const finalAnswer =
-          data.answer || "I'm having a little trouble right now.";
+          (data && (data.answer || data.data || data.response)) ||
+          "I'm having a little trouble right now.";
         setMessages((prev) => {
           const updated = prev.filter(
             (msg) => msg.text !== "OmiBot is thinking..."
@@ -128,9 +158,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       let botMessage = "";
 
       setMessages((prev) => {
-        const updated = prev.filter(
-          (msg) => msg.text !== "OmiBot is thinking..."
-        );
+        const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
         return [
           ...updated,
           { type: "bot", text: "", loading: true, streaming: true },
@@ -143,13 +171,19 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         if (done) break;
 
         fullChunk += decoder.decode(value, { stream: true });
-        
+
         try {
+          // API may stream newline-separated JSON or raw text; try JSON parse first
           const parsed = JSON.parse(fullChunk);
-          if(parsed.answer) {
-             botMessage = parsed.answer;
+          if (parsed.answer) {
+            botMessage = parsed.answer;
+          } else if (parsed.data) {
+            botMessage = parsed.data;
+          } else {
+            // fallback to fullChunk content
+            botMessage = fullChunk;
           }
-        } catch(e) {
+        } catch (e) {
           botMessage = fullChunk;
         }
 
@@ -215,18 +249,21 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-      handleSend(trimmed, true);
+      // send email value silently to backend so it can store and reply if needed
+      // ensure thinking placeholder is shown for the backend response
+      handleSend(trimmed, true, { suppressThinking: false });
     } catch (err) {
       console.error("Failed to register email:", err);
     }
   };
 
-  // --- UPDATED: Fixes the duplicate "No worries!" message ---
   const handleEmailReject = () => {
+    // Hide the email UI locally and send the negative response silently to backend.
+    // Do NOT append the "No worries!" message locally to avoid duplication:
+    // backend will respond with "👍 No worries! We'll keep chatting here." and we will render it.
     setSessionDismissed(true);
-    // Silently inform the backend. The backend will now be responsible
-    // for sending the "No worries!" message.
-    handleSend("no thanks", true); 
+    // ensure thinking placeholder is shown for the backend reply
+    handleSend("no thanks", true, { suppressThinking: false });
   };
 
   return (
@@ -261,6 +298,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
+        {/* Email prompt UI (unchanged logic and regex) */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) =>
@@ -287,32 +325,38 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
+        {/* Onboarding UI: frontend shows "To personalize..." and buttons */}
         {showOnboarding ? (
-          <div className="onboarding-buttons">
-            <button
-              onClick={() => {
-                handleSend("Eco Shopper", true);
-                setShowOnboarding(false);
-              }}
-            >
-              Eco Shopper
-            </button>
-            <button
-              onClick={() => {
-                handleSend("Creator", true);
-                setShowOnboarding(false);
-              }}
-            >
-              Creator
-            </button>
-            <button
-              onClick={() => {
-                handleSend("Brand Owner", true);
-                setShowOnboarding(false);
-              }}
-            >
-              Brand Owner
-            </button>
+          <div className="onboarding-section">
+            <div className="onboarding-prompt">
+            </div>
+            <div className="onboarding-buttons">
+              <button
+                onClick={() => {
+                  // send selection silently but show thinking placeholder for backend reply
+                  handleSend("Eco Shopper", true, { suppressThinking: false });
+                  setShowOnboarding(false);
+                }}
+              >
+                Eco Shopper
+              </button>
+              <button
+                onClick={() => {
+                  handleSend("Creator", true, { suppressThinking: false });
+                  setShowOnboarding(false);
+                }}
+              >
+                Creator
+              </button>
+              <button
+                onClick={() => {
+                  handleSend("Brand Owner", true, { suppressThinking: false });
+                  setShowOnboarding(false);
+                }}
+              >
+                Brand Owner
+              </button>
+            </div>
           </div>
         ) : (
           <div className="input-bar">
