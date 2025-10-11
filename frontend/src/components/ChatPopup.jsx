@@ -25,21 +25,9 @@ export default function ChatPopup({ onClose }) {
         {
           type: "bot",
           text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨
-I'm here to help you discover sustainable brands, learn eco tips, and master live shopping - whether you're a conscious shopper or a creator ready to go live!
-Ask me about:
-🛍️ Sustainable shopping & green living tips
-📱 Live shopping experiences & authentic brand connections
-🌿 Eco-friendly brands & sustainability insights
-🎯 Creator resources - Get our free step-by-step live shopping workbook!
-
-Ready to chat about conscious commerce? What can I help you with today? 🎉`,
-        },
-        {
-          type: "bot",
-          text: "To personalize your experience, please let me know who you are.",
+I can help you discover sustainable brands, learn eco tips, and support creators. Ready to chat?`,
         },
       ]);
-      setShowOnboarding(true); // Show buttons immediately
     }
   }, []);
 
@@ -329,6 +317,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-prompt">
+              To personalize your experience, please let me know who you are.
             </div>
             <div className="onboarding-buttons">
               <button
