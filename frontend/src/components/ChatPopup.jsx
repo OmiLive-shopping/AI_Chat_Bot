@@ -18,23 +18,26 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Initial greeting: onboarding prompt will be shown from frontend
+  // Initial greeting: Set two initial messages to be displayed.
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
         {
           type: "bot",
-          text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨
-I can help you discover sustainable brands, learn eco tips, and support creators. Ready to chat?`,
+          text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨ I'm here to help you discover sustainable brands, learn eco tips, and master live shopping - whether you're a conscious shopper or a creator ready to go live! Ask me about: 🛍️ Sustainable shopping & green living tips 📱 Live shopping experiences & authentic brand connections 🌿 Eco-friendly brands & sustainability insights 🎯 Creator resources - Get our free step-by-step live shopping workbook! Ready to chat about conscious commerce? What can I help you with today? 🎉`,
+        },
+        {
+          type: "bot",
+          text: "To personalize your experience, please let me know who you are.",
         },
       ]);
     }
   }, []);
 
-  // When the first greeting appears, trigger onboarding backend flag and show frontend onboarding UI
+  // When the two initial messages appear, trigger onboarding and show the buttons.
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-    if (messages.length === 1 && lastMessage?.type === "bot") {
+    if (messages.length === 2 && lastMessage?.type === "bot") {
       // send onboarding ping to backend but suppress the local "thinking" placeholder only for this ping
       handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
       setShowOnboarding(true);
@@ -313,12 +316,9 @@ I can help you discover sustainable brands, learn eco tips, and support creators
             </div>
           )}
 
-        {/* Onboarding UI: frontend shows "To personalize..." and buttons */}
+        {/* Onboarding UI: shows only the buttons, as the prompt is now a chat message */}
         {showOnboarding ? (
           <div className="onboarding-section">
-            <div className="onboarding-prompt">
-              To personalize your experience, please let me know who you are.
-            </div>
             <div className="onboarding-buttons">
               <button
                 onClick={() => {
