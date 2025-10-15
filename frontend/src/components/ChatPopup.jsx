@@ -18,7 +18,7 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Initial greeting
+  // Initial greeting: Set two initial messages to be displayed.
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -34,10 +34,11 @@ export default function ChatPopup({ onClose }) {
     }
   }, []);
 
-  // Onboarding trigger
+  // When the two initial messages appear, trigger onboarding and show the buttons.
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (messages.length === 2 && lastMessage?.type === "bot") {
+      // send onboarding ping to backend but suppress the local "thinking" placeholder only for this ping
       handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
       setShowOnboarding(true);
     }
@@ -73,11 +74,18 @@ export default function ChatPopup({ onClose }) {
     return () => stopContinuousScrolling();
   }, [messages]);
 
+  /**
+   * handleSend
+   * messageOverride: string or undefined -> message to send
+   * isSilent: when true we do not add a user message to the chat UI (used for onboarding & email submits)
+   * opts: { suppressThinking: boolean } to avoid adding the "OmiBot is thinking..." placeholder for some pings
+   */
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
+    // Special-case onboarding ping: still call backend to set session state, but avoid local placeholders
     const isOnboardingPing = message === "__GET_ONBOARDING__";
 
     setIsLoading(true);
@@ -87,12 +95,14 @@ export default function ChatPopup({ onClose }) {
     }
     setInput("");
 
+    // Only add the thinking placeholder if not suppressed and this is not the special onboarding ping
     if (!opts.suppressThinking && !isOnboardingPing) {
       setMessages((prev) => [
         ...prev,
         { type: "bot", text: "OmiBot is thinking...", loading: true },
       ]);
 
+      // start auto-scroll
       scrollIntervalRef.current = setInterval(() => {
         if (chatBoxRef.current) {
           chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -108,8 +118,11 @@ export default function ChatPopup({ onClose }) {
         credentials: "include",
       });
 
+      // If onboarding ping (backend returns empty string intentionally), handle gracefully
       if (isOnboardingPing) {
+        // backend sets session flag and returns empty; we don't need to show any immediate reply
         setShowOnboarding(true);
+        // ensure we stop loading state because we suppressed thinking for onboarding
         setIsLoading(false);
         return;
       }
@@ -151,15 +164,17 @@ export default function ChatPopup({ onClose }) {
         fullChunk += decoder.decode(value, { stream: true });
 
         try {
+          // API may stream newline-separated JSON or raw text; try JSON parse first
           const parsed = JSON.parse(fullChunk);
           if (parsed.answer) {
             botMessage = parsed.answer;
           } else if (parsed.data) {
             botMessage = parsed.data;
           } else {
+            // fallback to fullChunk content
             botMessage = fullChunk;
           }
-        } catch {
+        } catch (e) {
           botMessage = fullChunk;
         }
 
@@ -225,6 +240,8 @@ export default function ChatPopup({ onClose }) {
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
+      // send email value silently to backend so it can store and reply if needed
+      // ensure thinking placeholder is shown for the backend response
       handleSend(trimmed, true, { suppressThinking: false });
     } catch (err) {
       console.error("Failed to register email:", err);
@@ -232,17 +249,13 @@ export default function ChatPopup({ onClose }) {
   };
 
   const handleEmailReject = () => {
+    // Hide the email UI locally and send the negative response silently to backend.
+    // Do NOT append the "No worries!" message locally to avoid duplication:
+    // backend will respond with "👍 No worries! We'll keep chatting here." and we will render it.
     setSessionDismissed(true);
+    // ensure thinking placeholder is shown for the backend reply
     handleSend("no thanks", true, { suppressThinking: false });
   };
-
-  // detect when email prompt is showing
-  const emailPromptVisible =
-    !emailSubmitted &&
-    !sessionDismissed &&
-    messages.some((m) =>
-      /drop your email|send.*workbook|what'?s your email/i.test(m.text)
-    );
 
   return (
     <div id="chat-popup">
@@ -276,35 +289,40 @@ export default function ChatPopup({ onClose }) {
           ))}
         </div>
 
-        {/* Email prompt UI */}
-        {emailPromptVisible && (
-          <div className="email-prompt">
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="example@domain.com"
-              disabled={isLoading}
-            />
-            <button onClick={handleEmailSubmit} disabled={isLoading}>
-              Submit
-            </button>
-            <button
-              onClick={handleEmailReject}
-              className="reject-btn"
-              disabled={isLoading}
-            >
-              No thanks
-            </button>
-          </div>
-        )}
+        {/* Email prompt UI (unchanged logic and regex) */}
+        {!emailSubmitted &&
+          !sessionDismissed &&
+          messages.some((m) =>
+            /drop your email|send.*workbook|what'?s your email/i.test(m.text)
+          ) && (
+            <div className="email-prompt">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="example@domain.com"
+                disabled={isLoading}
+              />
+              <button onClick={handleEmailSubmit} disabled={isLoading}>
+                Submit
+              </button>
+              <button
+                onClick={handleEmailReject}
+                className="reject-btn"
+                disabled={isLoading}
+              >
+                No thanks
+              </button>
+            </div>
+          )}
 
-        {/* Onboarding UI or normal input */}
+        {/* Onboarding UI: shows only the buttons, as the prompt is now a chat message */}
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-buttons">
               <button
                 onClick={() => {
+                  // send selection silently but show thinking placeholder for backend reply
                   handleSend("Eco Shopper", true, { suppressThinking: false });
                   setShowOnboarding(false);
                 }}
@@ -330,7 +348,7 @@ export default function ChatPopup({ onClose }) {
             </div>
           </div>
         ) : (
-          <div className={`input-bar ${emailPromptVisible ? "disabled" : ""}`}>
+          <div className="input-bar">
             <textarea
               ref={textareaRef}
               rows="1"
@@ -345,12 +363,12 @@ export default function ChatPopup({ onClose }) {
                   handleSend();
                 }
               }}
-              disabled={isLoading || emailPromptVisible}
+              disabled={isLoading}
             />
             <button
               className="send-btn"
               onClick={() => handleSend()}
-              disabled={isLoading || !input.trim() || emailPromptVisible}
+              disabled={isLoading || !input.trim()}
             >
               <svg viewBox="0 0 24 24" width="22" height="22">
                 <path
