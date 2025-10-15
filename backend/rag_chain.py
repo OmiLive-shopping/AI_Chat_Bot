@@ -58,8 +58,8 @@ except Exception as e:
     db = None
 
 DATA_DIR = os.environ.get('DATA_DIR', 'data')
-BRAND_CSV = os.path.join(DATA_DIR, "cleaned_brand_metrics.csv")
-WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx"
+BRAND_CSV = os.path.join(DATA_DIR, "cleaned_brand_metrics.csv") 
+WORKBOOK_FILENAME = "Live_Sales_Tactical_Workbook.docx" 
 WORKBOOK_PATH = os.path.join(DATA_DIR, WORKBOOK_FILENAME)
 QUIZZES_DIR = os.path.join(DATA_DIR, "quizzes")
 VECTORSTORE_DIR = os.environ.get('VECTORSTORE_DIR', os.path.join(DATA_DIR, "omi_index"))
@@ -94,12 +94,6 @@ PROACTIVE_SUGGESTIONS = [
     "You can also ask me for tips on eating more sustainably.",
     "You can also ask me: 'What are the dangers in conventional tampons?'",
     "You can also ask me about superfood drinks for glowing skin."
-]
-
-# NEW: Workbook keywords for mid-conversation detection
-WORKBOOK_KEYWORDS = [
-    'tactical workbook', 'live sales workbook', 'workbook',
-    'sales guide', 'creator guide', 'creator workbook', 'brand workbook'
 ]
 
 # =========================
@@ -145,7 +139,6 @@ class UserSessionManager:
             "waiting_for_user_classification": False, "user_type": None,
             "waiting_for_email": False, "offered_suggestions": [],
             "email_prompt_denied": False, "workbook_sent": False,
-            "email_address": None,  # NEW: Track if email was provided
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -185,15 +178,22 @@ def is_negative_response(text: str) -> bool:
 
 def detect_routine_intent(question: str) -> Optional[str]:
     cleaned_q = _clean_text(question)
+
+    # Extended set of triggers for more robust detection (skin + hair)
     quiz_trigger_keywords = [
+        # generic triggers
         'routine', 'regimen', 'help with my', 'help with', 'quiz', 'take quiz', 'begin quiz',
+        # skin-related triggers
         'skin', 'skin care', 'skincare', 'skin routine', 'face', 'face care', 'moisturizer',
         'serum', 'toner', 'acne', 'blemish', 'pimple', 'dry skin', 'oily skin', 'combination skin',
         'sensitive skin', 'wrinkle', 'aging', 'anti aging', 'sunscreen', 'spf',
+        # hair-related triggers
         'hair', 'hair care', 'haircare', 'hair routine', 'hair regimen', 'shampoo', 'conditioner',
         'split ends', 'frizz', 'hair loss', 'dandruff', 'scalp', 'styling', 'curly', 'curly hair',
         'straight hair', 'color treated', 'chemically treated', 'leave in', 'hair mask', 'hair oil'
     ]
+
+    # Fine-grained keyword lists to classify hair vs skin when possible
     hair_keywords = [
         'hair', 'shampoo', 'conditioner', 'curl', 'curly', 'straight', 'scalp', 'dandruff',
         'split ends', 'frizz', 'styling', 'haircare', 'hair care', 'hair loss', 'color treated',
@@ -203,13 +203,24 @@ def detect_routine_intent(question: str) -> Optional[str]:
         'skin', 'skincare', 'skin care', 'face', 'moistur', 'serum', 'acne', 'blemish', 'pimple',
         'dry skin', 'oily skin', 'combination', 'sensitive', 'wrinkle', 'aging', 'sunscreen', 'spf'
     ]
+
+    # If any trigger phrase exists in the cleaned query, proceed to classify
     if any(trigger in cleaned_q for trigger in quiz_trigger_keywords):
         has_hair = any(word in cleaned_q for word in hair_keywords)
         has_skin = any(word in cleaned_q for word in skin_keywords)
-        if has_hair and not has_skin: return 'hair'
-        if has_skin and not has_hair: return 'skin'
-        if 'skin' in cleaned_q or 'skincare' in cleaned_q or 'face' in cleaned_q: return 'skin'
-        if 'hair' in cleaned_q or 'shampoo' in cleaned_q or 'conditioner' in cleaned_q: return 'hair'
+
+        # prefer explicit classification
+        if has_hair and not has_skin:
+            return 'hair'
+        if has_skin and not has_hair:
+            return 'skin'
+        # if both or neither, choose fallback based on presence of words
+        # if both present, prioritize skin if 'skin' appears explicitly
+        if 'skin' in cleaned_q or 'skincare' in cleaned_q or 'face' in cleaned_q:
+            return 'skin'
+        if 'hair' in cleaned_q or 'shampoo' in cleaned_q or 'conditioner' in cleaned_q:
+            return 'hair'
+        # fallback: if generic 'routine' or 'regimen' assume skin (safer default for skincare-focused product flow)
         return 'skin'
     return None
 
@@ -246,28 +257,16 @@ def get_follow_up_suggestion(session_data: dict) -> str:
     available = [s for s in PROACTIVE_SUGGESTIONS if s not in offered]
     if not available:
         return ""
+    
     suggestion = random.choice(available)
     offered.append(suggestion)
     session_data["offered_suggestions"] = offered
+    
     return f"\n_Psst... {suggestion}_"
 
 # =========================
-# Brand & Workbook Logic
+# Brand Logic
 # =========================
-def _get_workbook_response() -> str:
-    """
-    Generates the markdown link for the workbook.
-    The workbook file must be publicly accessible in a GCS bucket.
-    """
-    # !!! IMPORTANT !!!
-    # Ensure 'Live_Sales_Tactical_Workbook.docx' is uploaded to your GCS bucket
-    # and has public read permissions.
-    workbook_url = f"https://storage.googleapis.com/{GOOGLE_CLOUD_PROJECT}/{WORKBOOK_FILENAME}"
-    return (
-        f"✅ Perfect! Your workbook is ready.\n\n"
-        f"You can download it here: [**Click to download {WORKBOOK_FILENAME}**]({workbook_url})"
-    )
-
 def get_brand_df() -> pd.DataFrame:
     global _brand_df
     if not _brand_df.empty: return _brand_df
@@ -288,13 +287,16 @@ def get_brand_ranking_single(brand_name: str) -> str:
     key = _make_key(brand_name)
     row = df[df["brand_key"] == key]
     if row.empty: return f"I couldn't find a ranking for '{brand_name}'."
+    
     row = row.iloc[0]
     score = row.get('final_score', 'N/A')
+    
     breakdown_cols = [c for c in df.columns if c not in ['brand_name', 'brand_key', 'final_score']]
     breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
+
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
     if breakdown:
-        response += "\n" + "\n".join(breakdown)
+        response += "\n".join(breakdown)
     return response
 
 def fuzzy_lookup_brand_candidates(user_text: str) -> List[str]:
@@ -317,14 +319,17 @@ def respond_with_brand_info() -> str:
     df = get_brand_df()
     if df.empty or 'final_score' not in df.columns:
         return "I don't have brand ranking information right now."
+    
     top_ranked = df.sort_values(by='final_score', ascending=False).head(5)
     response_lines = ["Sure! Here are some of the top eco-friendly brands we've ranked on a scale of 30:\n"]
     for i, row in enumerate(top_ranked.itertuples(), 1):
         response_lines.append(f"{i}. **{row.brand_name}** (Score: {row.final_score})")
+        
     all_brands = sorted(df["brand_name"].dropna().unique())
     response_lines.append("\nI also track: " + ", ".join(all_brands))
+    
     return "\n".join(response_lines)
-
+    
 # =========================
 # Quiz Logic
 # =========================
@@ -390,15 +395,20 @@ def get_rag_response(question: str, user_id: str) -> str:
     is_negative = is_negative_response(raw_q)
 
     # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
+    # NOTE: onboarding trigger is intended to be handled by frontend UI.
+    # We still set the session flag so backend knows to expect the next classification input,
+    # but we intentionally do NOT return the onboarding message from backend (frontend will).
     if raw_q == "__GET_ONBOARDING__":
         session_data['waiting_for_user_classification'] = True
+        # persist state immediately and return empty response (frontend will display the message)
         _session_manager.update_session(user_id, session_data)
         return ""
 
     elif session_data.get("waiting_for_user_classification"):
         cleaned_q = _clean_text(raw_q)
         session_data['waiting_for_user_classification'] = False
-        if 'eco shopper' in cleaned_q or 'ecoshopper' in cleaned_q:
+        
+        if 'eco shopper' in cleaned_q or 'ecoshopper' in cleaned_q or 'eco_shopper' in cleaned_q:
             session_data['user_type'] = 'eco_shopper'
             answer = ("🌱 Welcome to Omi Live, your eco living girlie! Ready to explore REAL eco-friendly brands?\n\n"
                       "Here’s what you’ll get as part of the Omi Fam:\n"
@@ -406,6 +416,7 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Exclusive offers & discounts\n"
                       "• Direct interaction with brand owners\n"
                       "• A front-row seat to watch eco-friendly brands grow")
+        
         elif 'creator' in cleaned_q:
             session_data['user_type'] = 'creator'
             answer = ("🎥 Hey there! Are you a creator interested in live shopping?\n\n"
@@ -416,7 +427,8 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Expanding your reach with eco-conscious buyers")
             session_data['waiting_for_workbook_confirmation'] = True
             answer += "\nWe’ve built a Live Sales Workbook for Creators — it shows you how to maximize earnings and grow with us. Want it?"
-        elif 'brand owner' in cleaned_q or 'brandowner' in cleaned_q:
+
+        elif 'brand owner' in cleaned_q or 'brandowner' in cleaned_q or 'brand_owner' in cleaned_q:
             session_data['user_type'] = 'brand_owner'
             answer = ("👋 Hi! Welcome to Omi Live — the AI-powered retail tech for eco-friendly brands. Are you a brand owner looking to grow sales?\n\n"
                       "We help brands like yours achieve 20% sales conversion through:\n"
@@ -425,24 +437,23 @@ def get_rag_response(question: str, user_id: str) -> str:
                       "• Live storytelling that builds trust")
             session_data['waiting_for_workbook_confirmation'] = True
             answer += "\nWould you like our Live Sales Workbook? It’s packed with strategies to boost sales. Want it?"
-        else:
-            session_data['waiting_for_user_classification'] = True
+        
+        else: 
+            session_data['waiting_for_user_classification'] = True 
             answer = "Please choose a valid option by clicking one of the buttons below."
         add_suggestion = False
     
-    # MODIFIED: Handle email submission to deliver workbook
     elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q):
         session_data['waiting_for_email'] = False
-        session_data['email_address'] = raw_q  # Save email to session
         user_type = session_data.get('user_type')
-
-        if user_type in ['creator', 'brand_owner']:
-            session_data['workbook_sent'] = True
-            answer = _get_workbook_response()  # Send workbook link
-        else:  # Eco Shopper
+        if user_type == 'brand_owner':
+            answer = "✅ Got it! Your workbook is on the way.\n\nWould you also like to see how brands use our smart product listing and live storytelling to grow sales?"
+        elif user_type == 'creator':
+            answer = "✅ Perfect! Your creator sales workbook is on the way."
+        else: # Eco Shopper
             answer = "You’re all set! We’ll share tips, community insights, and opportunities to feature your brand on Omi Live.\n\nWe’re having your personalized matches brewing. Stay tuned on Omi updates!"
         add_suggestion = False
-
+    
     elif session_data.get("current_quiz_session"):
         if _clean_text(raw_q).isdigit():
             answer = answer_quiz_option(session_data, int(_clean_text(raw_q)))
@@ -457,6 +468,7 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = start_quiz(session_data, quiz_type)
         else:
             session_data["waiting_for_quiz_start"] = False
+            # give a neutral single-line response when user declines
             answer = "No problem — if you change your mind, I can start the quiz anytime."
         add_suggestion = False
 
@@ -465,13 +477,13 @@ def get_rag_response(question: str, user_id: str) -> str:
             session_data['waiting_for_email'] = True
             if session_data.get('user_type') == 'creator':
                 answer = "Awesome! Share your email so we can send the workbook + early invites to campaigns."
-            else:  # Brand Owner
+            else: # Brand Owner
                 answer = "Great! Drop your email so we can send you the workbook + early access to our tools."
         elif is_negative:
             answer = "No problem! What else can I help you with today?"
         session_data['waiting_for_workbook_confirmation'] = False
         add_suggestion = False
-
+        
     elif session_data.get("waiting_for_rank_confirmation"):
         if is_affirmative:
             brand_to_rank = session_data.get("brand_to_rank")
@@ -480,8 +492,9 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "Got it, no problem! How else can I help?"
         session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
         add_suggestion = False
-
+        
     elif is_negative_response(raw_q) and session_data.get('waiting_for_email'):
+        # user declined to provide email — make this a single, guarded response and mark state
         session_data['email_prompt_denied'] = True
         session_data['waiting_for_email'] = False
         answer = "👍 No worries! We'll keep chatting here."
@@ -490,79 +503,71 @@ def get_rag_response(question: str, user_id: str) -> str:
     # --- BLOCK B: If no stateful response, handle new query ---
     if not answer:
         add_suggestion = True
+        
         session_data.update({
-            'waiting_for_quiz_start': False, 'quiz_type_pending': None,
-            'waiting_for_rank_confirmation': False, 'brand_to_rank': None
+            'waiting_for_quiz_start': False, 
+            'quiz_type_pending': None,
+            'waiting_for_rank_confirmation': False, 
+            'brand_to_rank': None
         })
-
+        
         cleaned_q = _clean_text(raw_q)
-
-        # NEW: High-priority check for workbook requests
-        if any(keyword in cleaned_q for keyword in WORKBOOK_KEYWORDS):
-            user_type = session_data.get('user_type')
-            if user_type in ['creator', 'brand_owner']:
-                if session_data.get('email_address'):
-                    answer = _get_workbook_response()  # Email on file, send link
-                else:
-                    session_data['waiting_for_email'] = True  # No email, ask for it
-                    answer = "Of course! To send you the workbook, what's your email?"
-            else:  # Eco-shopper or unclassified
-                answer = "The Live Sales Workbook is designed for Creators and Brand Owners. Let me know if you'd like to learn more about those roles!"
-            add_suggestion = False
-
-        if not answer:
-            if "rank brand" in cleaned_q or "brand ranking" in cleaned_q or "suggest brand" in cleaned_q or "list brand" in cleaned_q:
-                answer = respond_with_brand_info()
+        
+        # --- High-priority keyword intents for brands ---
+        if "rank brand" in cleaned_q or "brand ranking" in cleaned_q or "suggest brand" in cleaned_q:
+            answer = respond_with_brand_info()
+        elif "list brand" in cleaned_q:
+             answer = respond_with_brand_info()
+        else:
+            # Fallback to other logic
+            quiz_type = detect_routine_intent(raw_q)
+            if quiz_type:
+                answer = offer_quiz(session_data, quiz_type)
             else:
-                quiz_type = detect_routine_intent(raw_q)
-                if quiz_type:
-                    answer = offer_quiz(session_data, quiz_type)
-                else:
-                    candidates = fuzzy_lookup_brand_candidates(raw_q)
-                    if len(candidates) == 1:
-                        brand_name = candidates[0]
-                        session_data["waiting_for_rank_confirmation"] = True
-                        session_data["brand_to_rank"] = brand_name
-                        answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
-                        add_suggestion = False
-                    elif len(candidates) > 1:
-                        answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
-                        add_suggestion = False
+                candidates = fuzzy_lookup_brand_candidates(raw_q)
+                if len(candidates) == 1:
+                    brand_name = candidates[0]
+                    session_data["waiting_for_rank_confirmation"] = True
+                    session_data["brand_to_rank"] = brand_name
+                    answer = f"I found the brand '{brand_name}'. Would you like me to provide its sustainability ranking?"
+                    add_suggestion = False
+                elif len(candidates) > 1:
+                    answer = "Did you mean one of these brands? You can ask me to 'rank' one.\n- " + "\n- ".join(candidates)
+                    add_suggestion = False
 
-                    if not answer:
-                        retriever = get_retriever()
-                        if not retriever:
-                            answer = "My knowledge base is currently unavailable. Please try again later."
+                if not answer: # Fallback to general RAG
+                    retriever = get_retriever()
+                    if not retriever:
+                        answer = "My knowledge base is currently unavailable. Please try again later."
+                    else:
+                        context_docs = retriever.invoke(raw_q)
+                        context = "\n\n".join(d.page_content for d in context_docs)
+                        if not context.strip():
+                            answer = "I'm not sure how to answer that. Could you try rephrasing?"
                         else:
-                            context_docs = retriever.invoke(raw_q)
-                            context = "\n\n".join(d.page_content for d in context_docs)
-                            if not context.strip():
-                                answer = "I'm not sure how to answer that. Could you try rephrasing?"
-                            else:
-                                prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-                                answer = get_llm().invoke(prompt).content
-
+                            prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+                            answer = get_llm().invoke(prompt).content
+    
     # --- Final Step: Append newsletter or suggestion ---
-    # This logic remains untouched, as it handles the general newsletter prompt, not the workbook delivery.
-
     should_prompt_email = False
     user_type = session_data.get('user_type')
     response_count = session_data.get('response_count', 0)
-
+    
     if not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
         if user_type == 'eco_shopper' and response_count == 4:
             should_prompt_email = True
-        # Don't prompt creators/brands for a general newsletter if they were already in a workbook flow
-        elif user_type in ['creator', 'brand_owner'] and not session_data.get('workbook_sent') and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
+        elif user_type in ['creator', 'brand_owner'] and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
             should_prompt_email = True
 
     if should_prompt_email:
         session_data['waiting_for_email'] = True
+        # ensure we don't duplicate similar email prompt strings elsewhere
         answer += ("\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                    "What's your email? 🌱")
         add_suggestion = False
-
+    
     if add_suggestion:
+        # Avoid appending suggestions that duplicate main messages or produce duplicate "no worries" lines.
         follow = get_follow_up_suggestion(session_data)
         if follow and follow.strip() not in answer:
             answer += follow
