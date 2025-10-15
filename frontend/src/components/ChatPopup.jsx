@@ -13,12 +13,15 @@ export default function ChatPopup({ onClose }) {
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  
+  // --- NEW: State to hold the session token from the backend ---
+  const [sessionToken, setSessionToken] = useState(null);
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Initial greeting: Set two initial messages to be displayed.
+  // Initial greeting (unchanged)
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -34,17 +37,17 @@ export default function ChatPopup({ onClose }) {
     }
   }, []);
 
-  // When the two initial messages appear, trigger onboarding and show the buttons.
+  // Onboarding logic (unchanged)
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (messages.length === 2 && lastMessage?.type === "bot") {
-      // send onboarding ping to backend but suppress the local "thinking" placeholder only for this ping
       handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
       setShowOnboarding(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
+  // Other useEffects for UI behavior (unchanged)
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
@@ -74,20 +77,12 @@ export default function ChatPopup({ onClose }) {
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  /**
-   * handleSend
-   * messageOverride: string or undefined -> message to send
-   * isSilent: when true we do not add a user message to the chat UI (used for onboarding & email submits)
-   * opts: { suppressThinking: boolean } to avoid adding the "OmiBot is thinking..." placeholder for some pings
-   */
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
-    // Special-case onboarding ping: still call backend to set session state, but avoid local placeholders
     const isOnboardingPing = message === "__GET_ONBOARDING__";
-
     setIsLoading(true);
 
     if (!isSilent && !isOnboardingPing) {
@@ -95,14 +90,12 @@ export default function ChatPopup({ onClose }) {
     }
     setInput("");
 
-    // Only add the thinking placeholder if not suppressed and this is not the special onboarding ping
+    // --- RESTORED: "OmiBot is thinking..." placeholder ---
     if (!opts.suppressThinking && !isOnboardingPing) {
       setMessages((prev) => [
         ...prev,
         { type: "bot", text: "OmiBot is thinking...", loading: true },
       ]);
-
-      // start auto-scroll
       scrollIntervalRef.current = setInterval(() => {
         if (chatBoxRef.current) {
           chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -111,49 +104,41 @@ export default function ChatPopup({ onClose }) {
     }
 
     try {
+      // --- MODIFIED: Prepare a payload that includes the session token ---
+      const bodyPayload = {
+        message,
+        session_token: sessionToken,
+      };
+
       const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-        credentials: "include",
+        body: JSON.stringify(bodyPayload),
+        // --- REMOVED: `credentials: "include"` as it's not needed for tokens ---
       });
 
-      // If onboarding ping (backend returns empty string intentionally), handle gracefully
       if (isOnboardingPing) {
-        // backend sets session flag and returns empty; we don't need to show any immediate reply
         setShowOnboarding(true);
-        // ensure we stop loading state because we suppressed thinking for onboarding
         setIsLoading(false);
         return;
       }
 
+      // --- RESTORED: Check for the response body to handle streaming ---
       if (!res.body) {
-        const data = await res.json().catch(() => ({}));
-        const finalAnswer =
-          (data && (data.answer || data.data || data.response)) ||
-          "I'm having a little trouble right now.";
-        setMessages((prev) => {
-          const updated = prev.filter(
-            (msg) => msg.text !== "OmiBot is thinking..."
-          );
-          return [
-            ...updated,
-            { type: "bot", text: finalAnswer, loading: false, streaming: false },
-          ];
-        });
-        return;
+        throw new Error("Response has no body");
       }
-
+      
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let botMessage = "";
-
+      
+      // --- RESTORED: Remove the "thinking" placeholder and add a blank message to stream into ---
       setMessages((prev) => {
-        const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
-        return [
-          ...updated,
-          { type: "bot", text: "", loading: true, streaming: true },
-        ];
+          const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
+          return [
+              ...updated,
+              { type: "bot", text: "", loading: true, streaming: true },
+          ];
       });
 
       let fullChunk = "";
@@ -162,22 +147,25 @@ export default function ChatPopup({ onClose }) {
         if (done) break;
 
         fullChunk += decoder.decode(value, { stream: true });
-
+        
         try {
-          // API may stream newline-separated JSON or raw text; try JSON parse first
+          // The backend sends the full JSON object in the final chunk.
+          // This will parse it to extract the answer and the session token.
           const parsed = JSON.parse(fullChunk);
           if (parsed.answer) {
             botMessage = parsed.answer;
-          } else if (parsed.data) {
-            botMessage = parsed.data;
-          } else {
-            // fallback to fullChunk content
-            botMessage = fullChunk;
+          }
+          // --- NEW: Capture the session token from the final response chunk ---
+          if (parsed.session_token) {
+            setSessionToken(parsed.session_token);
           }
         } catch (e) {
-          botMessage = fullChunk;
+          // If it's not valid JSON yet, it's an intermediate text chunk.
+          // Your previous logic may have handled this differently, but for a final JSON payload,
+          // we just wait for the full valid JSON. The `botMessage` will be updated once parsed.
         }
 
+        // Update the UI with the latest text content
         setMessages((prev) => {
           const updated = [...prev];
           const lastIndex = updated.length - 1;
@@ -186,15 +174,14 @@ export default function ChatPopup({ onClose }) {
             updated[lastIndex].type === "bot" &&
             updated[lastIndex].streaming
           ) {
-            updated[lastIndex] = {
-              ...updated[lastIndex],
-              text: botMessage,
-              loading: true,
-            };
+            // If the final answer is parsed, use it. Otherwise, this part might not be strictly needed
+            // if your backend only sends one final JSON chunk. But it's safe to keep.
+            updated[lastIndex].text = botMessage || fullChunk;
           }
           return updated;
         });
       }
+
     } catch (err) {
       console.error("Fetch error:", err);
       setMessages((prev) => {
@@ -207,7 +194,6 @@ export default function ChatPopup({ onClose }) {
             type: "bot",
             text: `⚠️ Error: Could not connect to the server.`,
             loading: false,
-            streaming: false,
           },
         ];
       });
@@ -218,7 +204,7 @@ export default function ChatPopup({ onClose }) {
         const lastIndex = updated.length - 1;
         if (lastIndex >= 0 && updated[lastIndex].type === "bot") {
           updated[lastIndex].loading = false;
-          updated[lastIndex].streaming = false;
+          updated[lastIndex].streaming = false; // Mark streaming as complete
         }
         return updated;
       });
@@ -236,12 +222,9 @@ export default function ChatPopup({ onClose }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
-        credentials: "include",
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-      // send email value silently to backend so it can store and reply if needed
-      // ensure thinking placeholder is shown for the backend response
       handleSend(trimmed, true, { suppressThinking: false });
     } catch (err) {
       console.error("Failed to register email:", err);
@@ -249,13 +232,22 @@ export default function ChatPopup({ onClose }) {
   };
 
   const handleEmailReject = () => {
-    // Hide the email UI locally and send the negative response silently to backend.
-    // Do NOT append the "No worries!" message locally to avoid duplication:
-    // backend will respond with "👍 No worries! We'll keep chatting here." and we will render it.
     setSessionDismissed(true);
-    // ensure thinking placeholder is shown for the backend reply
     handleSend("no thanks", true, { suppressThinking: false });
   };
+
+  // --- UI LOGIC TO SHOW PROMPT AND DISABLE INPUT ---
+  const showEmailPrompt =
+    !emailSubmitted &&
+    !sessionDismissed &&
+    messages.some((m) => /email/i.test(m.text));
+
+  let placeholderText = "Ask me something...";
+  if (isLoading) {
+    placeholderText = "OmiBot is thinking...";
+  } else if (showEmailPrompt) {
+    placeholderText = "Please use the email form above...";
+  }
 
   return (
     <div id="chat-popup">
@@ -266,6 +258,7 @@ export default function ChatPopup({ onClose }) {
             className="new-chat-btn"
             onClick={() => {
               localStorage.removeItem("userEmail");
+              setSessionToken(null);
               window.location.reload();
             }}
           >
@@ -289,40 +282,33 @@ export default function ChatPopup({ onClose }) {
           ))}
         </div>
 
-        {/* Email prompt UI (unchanged logic and regex) */}
-        {!emailSubmitted &&
-          !sessionDismissed &&
-          messages.some((m) =>
-            /drop your email|send.*workbook|what'?s your email/i.test(m.text)
-          ) && (
-            <div className="email-prompt">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="example@domain.com"
-                disabled={isLoading}
-              />
-              <button onClick={handleEmailSubmit} disabled={isLoading}>
-                Submit
-              </button>
-              <button
-                onClick={handleEmailReject}
-                className="reject-btn"
-                disabled={isLoading}
-              >
-                No thanks
-              </button>
-            </div>
-          )}
+        {showEmailPrompt && (
+          <div className="email-prompt">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@domain.com"
+              disabled={isLoading}
+            />
+            <button onClick={handleEmailSubmit} disabled={isLoading}>
+              Submit
+            </button>
+            <button
+              onClick={handleEmailReject}
+              className="reject-btn"
+              disabled={isLoading}
+            >
+              No thanks
+            </button>
+          </div>
+        )}
 
-        {/* Onboarding UI: shows only the buttons, as the prompt is now a chat message */}
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-buttons">
               <button
                 onClick={() => {
-                  // send selection silently but show thinking placeholder for backend reply
                   handleSend("Eco Shopper", true, { suppressThinking: false });
                   setShowOnboarding(false);
                 }}
@@ -352,9 +338,7 @@ export default function ChatPopup({ onClose }) {
             <textarea
               ref={textareaRef}
               rows="1"
-              placeholder={
-                isLoading ? "OmiBot is thinking..." : "Ask me something..."
-              }
+              placeholder={placeholderText}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -363,12 +347,12 @@ export default function ChatPopup({ onClose }) {
                   handleSend();
                 }
               }}
-              disabled={isLoading}
+              disabled={isLoading || showEmailPrompt}
             />
             <button
               className="send-btn"
               onClick={() => handleSend()}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || showEmailPrompt}
             >
               <svg viewBox="0 0 24 24" width="22" height="22">
                 <path

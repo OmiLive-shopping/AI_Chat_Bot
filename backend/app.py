@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import traceback
 import os
@@ -24,7 +24,6 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 # --- CORS Configuration ---
 # This tells the browser that it's safe for your Wix site to make requests to this server.
-# It is a mandatory security requirement.
 allowed_origins = os.environ.get(
     "ALLOWED_ORIGINS",
     "https://omilivechatbot.netlify.app,http://localhost:3000,https://www.omilive.com"
@@ -32,25 +31,11 @@ allowed_origins = os.environ.get(
 CORS(
     app,
     origins=[origin.strip() for origin in allowed_origins.split(",") if origin.strip()],
-    supports_credentials=True  # This is CRITICAL for allowing cookies to be sent
+    supports_credentials=True # supports_credentials is still good practice for other headers
 )
 
-# --- Session Configuration ---
-# A secret key is required for Flask sessions to be encrypted.
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "omi-chatbot-secret-fallback-key-dev")
-
-# --- CRITICAL FIX FOR IFRAME EMBEDDING ---
-# This configures the session cookie to work correctly across different domains.
-app.config.update(
-    # 'Secure=True' is required for SameSite=None. It ensures the cookie is only sent over HTTPS.
-    SESSION_COOKIE_SECURE=True,
-    # 'HttpOnly=True' is a security best practice to prevent client-side script access.
-    SESSION_COOKIE_HTTPONLY=True,
-    # 'SameSite=None' tells the browser to send the cookie even when the request
-    # is coming from a different site (i.e., your Wix site making a request to your backend).
-    # This is ESSENTIAL for the session to persist in an iframe.
-    SESSION_COOKIE_SAMESITE="None",
-)
+# NOTE: All Flask session and cookie configuration has been removed.
+# We are now using a stateless token-based approach.
 
 # =========================
 # Routes
@@ -96,26 +81,33 @@ def register_email():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    """Main chat endpoint that handles conversation logic."""
+    """Main chat endpoint that handles conversation logic using a stateless token."""
     try:
         if not request.is_json:
             return jsonify({"answer": "Invalid request: Content-Type must be application/json"}), 415
         
         data = request.get_json()
         user_input = data.get("message", "").strip()
+        session_token = data.get("session_token") # Frontend must send the token back
+
         if not user_input:
             return jsonify({"answer": "Empty message received"}), 400
 
-        # Create a new session ID if one doesn't exist.
-        # This relies on the cookie configuration above to work on the Wix site.
-        if 'user_id' not in session:
-            session['user_id'] = os.urandom(16).hex()
-            print(f"[INFO] New session created for user_id: {session['user_id']}")
-
-        # Get the response from the main RAG chain logic
-        answer = get_rag_response(user_input, session['user_id'])
+        # If no token is provided by the client, generate a new one.
+        # This will be the user's unique ID for the entire conversation.
+        if not session_token:
+            user_id = os.urandom(16).hex()
+            print(f"[INFO] No token received. New session created for user_id: {user_id}")
+        else:
+            user_id = session_token
         
-        return jsonify({"answer": answer})
+        # Get the response from the main RAG chain logic, using the token as the user_id
+        answer = get_rag_response(user_input, user_id)
+        
+        # ALWAYS return the token (either the new or existing one) back to the client.
+        # The client is responsible for storing it and sending it with the next request.
+        return jsonify({"answer": answer, "session_token": user_id})
+
     except Exception as e:
         print(f"[ERROR] An unexpected error occurred in /chat route: {e}")
         traceback.print_exc()
