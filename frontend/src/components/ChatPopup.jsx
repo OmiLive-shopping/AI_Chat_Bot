@@ -18,7 +18,7 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Initial greeting: Set two initial messages to be displayed.
+  // Initial greeting
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -34,11 +34,10 @@ export default function ChatPopup({ onClose }) {
     }
   }, []);
 
-  // When the two initial messages appear, trigger onboarding and show the buttons.
+  // Onboarding trigger
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (messages.length === 2 && lastMessage?.type === "bot") {
-      // send onboarding ping to backend but suppress the local "thinking" placeholder only for this ping
       handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
       setShowOnboarding(true);
     }
@@ -80,6 +79,7 @@ export default function ChatPopup({ onClose }) {
     if (!message || isLoading) return;
 
     const isOnboardingPing = message === "__GET_ONBOARDING__";
+
     setIsLoading(true);
 
     if (!isSilent && !isOnboardingPing) {
@@ -92,6 +92,7 @@ export default function ChatPopup({ onClose }) {
         ...prev,
         { type: "bot", text: "OmiBot is thinking...", loading: true },
       ]);
+
       scrollIntervalRef.current = setInterval(() => {
         if (chatBoxRef.current) {
           chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -151,8 +152,14 @@ export default function ChatPopup({ onClose }) {
 
         try {
           const parsed = JSON.parse(fullChunk);
-          botMessage = parsed.answer || parsed.data || fullChunk;
-        } catch (e) {
+          if (parsed.answer) {
+            botMessage = parsed.answer;
+          } else if (parsed.data) {
+            botMessage = parsed.data;
+          } else {
+            botMessage = fullChunk;
+          }
+        } catch {
           botMessage = fullChunk;
         }
 
@@ -229,21 +236,13 @@ export default function ChatPopup({ onClose }) {
     handleSend("no thanks", true, { suppressThinking: false });
   };
 
-  // --- NEW: Create a clean boolean to check if the email prompt should be shown ---
-  const showEmailPrompt =
+  // detect when email prompt is showing
+  const emailPromptVisible =
     !emailSubmitted &&
     !sessionDismissed &&
     messages.some((m) =>
       /drop your email|send.*workbook|what'?s your email/i.test(m.text)
     );
-
-  // --- NEW: Determine the placeholder text based on multiple states ---
-  let placeholderText = "Ask me something...";
-  if (isLoading) {
-    placeholderText = "OmiBot is thinking...";
-  } else if (showEmailPrompt) {
-    placeholderText = "Please use the email form above...";
-  }
 
   return (
     <div id="chat-popup">
@@ -277,8 +276,8 @@ export default function ChatPopup({ onClose }) {
           ))}
         </div>
 
-        {/* --- MODIFIED: Use the new boolean for cleaner rendering --- */}
-        {showEmailPrompt && (
+        {/* Email prompt UI */}
+        {emailPromptVisible && (
           <div className="email-prompt">
             <input
               type="email"
@@ -300,6 +299,7 @@ export default function ChatPopup({ onClose }) {
           </div>
         )}
 
+        {/* Onboarding UI or normal input */}
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-buttons">
@@ -330,11 +330,13 @@ export default function ChatPopup({ onClose }) {
             </div>
           </div>
         ) : (
-          <div className="input-bar">
+          <div className={`input-bar ${emailPromptVisible ? "disabled" : ""}`}>
             <textarea
               ref={textareaRef}
               rows="1"
-              placeholder={placeholderText} // --- MODIFIED: Use the new placeholder variable
+              placeholder={
+                isLoading ? "OmiBot is thinking..." : "Ask me something..."
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -343,14 +345,12 @@ export default function ChatPopup({ onClose }) {
                   handleSend();
                 }
               }}
-              // --- MODIFIED: Disable if loading OR if the email prompt is showing
-              disabled={isLoading || showEmailPrompt}
+              disabled={isLoading || emailPromptVisible}
             />
             <button
               className="send-btn"
               onClick={() => handleSend()}
-              // --- MODIFIED: Disable if loading, no input, OR if the email prompt is showing
-              disabled={isLoading || !input.trim() || showEmailPrompt}
+              disabled={isLoading || !input.trim() || emailPromptVisible}
             >
               <svg viewBox="0 0 24 24" width="22" height="22">
                 <path

@@ -379,3 +379,9 @@ textarea:disabled {
 .onboarding-buttons button:hover {
   background-color: #eee;
 }
+
+.input-bar.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
