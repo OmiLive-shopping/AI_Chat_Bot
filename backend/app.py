@@ -36,12 +36,6 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="None"
 )
 
-# Optional: reinforce credentials support
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
-
 # =========================
 # Routes
 # =========================
