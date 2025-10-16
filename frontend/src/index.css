@@ -393,3 +393,12 @@ textarea:disabled {
   border-radius: 4px;
   text-transform: uppercase;
 }
+
+.header-left {
+  position: relative;
+  font-weight: 600;
+}
+
+.header-left span:last-child {
+  letter-spacing: 0.5px;
+}
