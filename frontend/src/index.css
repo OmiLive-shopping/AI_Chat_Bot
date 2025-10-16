@@ -380,25 +380,12 @@ textarea:disabled {
   background-color: #eee;
 }
 
-/* Beta badge styling */
 .beta-badge {
-  position: relative;
-  top: -8px;
-  margin-left: 6px;
-  background-color: #facc15; /* yellow-500 */
+  background-color: #facc15; /* yellow-400 */
   color: black;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: bold;
-  padding: 2px 4px;
+  padding: 0 4px;
   border-radius: 4px;
   text-transform: uppercase;
-}
-
-.header-left {
-  position: relative;
-  font-weight: 600;
-}
-
-.header-left span:last-child {
-  letter-spacing: 0.5px;
 }

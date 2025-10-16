@@ -244,11 +244,9 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   return (
     <div id="chat-popup">
       <header className="chat-header">
-        <div className="header-left relative">
-          OmiBot | Omi Live
-          <span className="absolute -top-2 -right-8 bg-yellow-400 text-black text-[8px] font-bold px-1 py-0.5 rounded uppercase">
-            Beta
-          </span>
+        <div className="header-left flex items-center gap-1">
+          <span>OmiBot | Omi Live</span>
+          <span className="beta-badge">Beta</span>
         </div>
 
         <div className="chat-header-right">
