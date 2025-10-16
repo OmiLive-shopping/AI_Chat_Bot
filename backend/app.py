@@ -1,8 +1,9 @@
 import os
 import traceback
+import uuid
 from datetime import datetime
 
-from flask import Flask, jsonify, request, send_from_directory, session
+from flask import Flask, jsonify, request, send_from_directory, session, make_response
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import safe_join
@@ -60,6 +61,18 @@ def health():
     return jsonify({"status": "healthy"}), 200
 
 
+@app.route("/session", methods=["GET"])
+def get_session():
+    """
+    Returns a persistent session token for Safari users where cookies may be blocked.
+    """
+    if "user_id" not in session:
+        session["user_id"] = os.urandom(16).hex()
+    response = make_response(jsonify({"session_id": session["user_id"]}))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/register-email", methods=["POST"])
 def register_email():
     """Registers a user's email address in the Firestore database."""
@@ -106,8 +119,12 @@ def chat():
         if not user_input:
             return jsonify({"answer": "Empty message received"}), 400
 
-        # Create a new session for the user if one doesn't exist
-        if "user_id" not in session:
+        # Safari fallback: use X-Session-ID header if provided
+        client_session = request.headers.get("X-Session-ID")
+
+        if client_session:
+            session["user_id"] = client_session
+        elif "user_id" not in session:
             session["user_id"] = os.urandom(16).hex()
             print(f"[INFO] New session created with user_id: {session['user_id']}")
 

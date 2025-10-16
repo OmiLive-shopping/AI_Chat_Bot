@@ -16,6 +16,20 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
+  // ✅ Session token (Safari-safe)
+  useEffect(() => {
+    let sessionId = localStorage.getItem("omiSessionId");
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem("omiSessionId", sessionId);
+    }
+  }, []);
+
+  const getSessionHeaders = () => {
+    const sessionId = localStorage.getItem("omiSessionId");
+    return sessionId ? { "X-Session-ID": sessionId } : {};
+  };
+
   // Initialize messages
   useEffect(() => {
     if (messages.length === 0) {
@@ -63,7 +77,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   }, [isLoading, messages, showOnboarding]);
 
-  // Stop scroll interval
   const stopContinuousScrolling = () => {
     if (scrollIntervalRef.current) {
       clearInterval(scrollIntervalRef.current);
@@ -71,7 +84,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // Auto-scroll to bottom on new message
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTo({
@@ -82,7 +94,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  // Handle message sending
+  // ✅ Modified handleSend (includes Safari-safe session header)
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message = typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
@@ -110,9 +122,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     try {
       const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...getSessionHeaders(), // ✅ Safari-safe session header
+        },
         body: JSON.stringify({ message }),
-        credentials: "include",
+        credentials: "include", // still keeps working for Chrome/Edge
       });
 
       if (isOnboardingPing) {
@@ -189,7 +204,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // Handle email submission
   const handleEmailSubmit = async () => {
     const trimmed = email.trim();
     const isValid = /\S+@\S+\.\S+/.test(trimmed);
@@ -198,7 +212,10 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     try {
       await fetch(`${BASE_URL}/register-email`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...getSessionHeaders(), // ✅ Safari-safe session header
+        },
         body: JSON.stringify({ email: trimmed }),
         credentials: "include",
       });
@@ -210,7 +227,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // Handle email rejection
   const handleEmailReject = () => {
     setSessionDismissed(true);
     handleSend("no thanks", true, { suppressThinking: false });
@@ -225,6 +241,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             className="new-chat-btn"
             onClick={() => {
               localStorage.removeItem("userEmail");
+              localStorage.removeItem("omiSessionId"); // ✅ reset local session too
               window.location.reload();
             }}
           >
@@ -243,7 +260,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
-        {/* Email prompt */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) =>
@@ -270,7 +286,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           )}
 
-        {/* Onboarding selection */}
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-buttons">
@@ -301,7 +316,6 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             </div>
           </div>
         ) : (
-          // Input bar
           <div className="input-bar">
             <textarea
               ref={textareaRef}
