@@ -1,3 +1,4 @@
+// frontend/src/components/ChatPopup.jsx
 import React, { useState, useEffect, useRef } from "react";
 import ChatMessage from "./ChatMessage";
 
@@ -30,7 +31,7 @@ export default function ChatPopup({ onClose }) {
     return sessionId ? { "X-Session-ID": sessionId } : {};
   };
 
-  // Initialize messages
+  // ✅ Initialize messages
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -54,7 +55,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   }, []);
 
-  // Auto-trigger onboarding
+  // ✅ Auto-trigger onboarding
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (messages.length === 2 && lastMessage?.type === "bot") {
@@ -63,14 +64,14 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   }, [messages.length]);
 
-  // Auto-resize textarea
+  // ✅ Auto-resize textarea
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
     textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
   }, [input]);
 
-  // Auto-focus input when appropriate
+  // ✅ Auto-focus input when appropriate
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -94,7 +95,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  // ✅ Modified handleSend (includes Safari-safe session header)
+  // ✅ Unified handleSend (Safari-safe session)
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message = typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
@@ -124,10 +125,10 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...getSessionHeaders(), // ✅ Safari-safe session header
+          ...getSessionHeaders(),
         },
         body: JSON.stringify({ message }),
-        credentials: "include", // still keeps working for Chrome/Edge
+        credentials: "include",
       });
 
       if (isOnboardingPing) {
@@ -204,6 +205,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
+  // ✅ Email handling
   const handleEmailSubmit = async () => {
     const trimmed = email.trim();
     const isValid = /\S+@\S+\.\S+/.test(trimmed);
@@ -214,7 +216,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...getSessionHeaders(), // ✅ Safari-safe session header
+          ...getSessionHeaders(),
         },
         body: JSON.stringify({ email: trimmed }),
         credentials: "include",
@@ -232,16 +234,29 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     handleSend("no thanks", true, { suppressThinking: false });
   };
 
+  const emailPromptActive =
+    !emailSubmitted &&
+    !sessionDismissed &&
+    messages.some((m) =>
+      /drop your email|send.*workbook|what'?s your email/i.test(m.text)
+    );
+
   return (
     <div id="chat-popup">
       <header className="chat-header">
-        <div className="header-left">OmiBot | Omi Live</div>
+        <div className="header-left relative">
+          OmiBot | Omi Live
+          <span className="absolute -top-2 -right-8 bg-yellow-400 text-black text-[8px] font-bold px-1 py-0.5 rounded uppercase">
+            Beta
+          </span>
+        </div>
+
         <div className="chat-header-right">
           <button
             className="new-chat-btn"
             onClick={() => {
               localStorage.removeItem("userEmail");
-              localStorage.removeItem("omiSessionId"); // ✅ reset local session too
+              localStorage.removeItem("omiSessionId");
               window.location.reload();
             }}
           >
@@ -260,31 +275,23 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
           ))}
         </div>
 
-        {!emailSubmitted &&
-          !sessionDismissed &&
-          messages.some((m) =>
-            /drop your email|send.*workbook|what'?s your email/i.test(m.text)
-          ) && (
-            <div className="email-prompt">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="example@domain.com"
-                disabled={isLoading}
-              />
-              <button onClick={handleEmailSubmit} disabled={isLoading}>
-                Submit
-              </button>
-              <button
-                onClick={handleEmailReject}
-                className="reject-btn"
-                disabled={isLoading}
-              >
-                No thanks
-              </button>
-            </div>
-          )}
+        {emailPromptActive && (
+          <div className="email-prompt">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="example@domain.com"
+              disabled={isLoading}
+            />
+            <button onClick={handleEmailSubmit} disabled={isLoading}>
+              Submit
+            </button>
+            <button onClick={handleEmailReject} className="reject-btn" disabled={isLoading}>
+              No thanks
+            </button>
+          </div>
+        )}
 
         {showOnboarding ? (
           <div className="onboarding-section">
@@ -320,21 +327,27 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
             <textarea
               ref={textareaRef}
               rows="1"
-              placeholder={isLoading ? "OmiBot is thinking..." : "Ask me something..."}
+              placeholder={
+                emailPromptActive
+                  ? "Please enter or skip email first..."
+                  : isLoading
+                  ? "OmiBot is thinking..."
+                  : "Ask me something..."
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !isLoading) {
+                if (e.key === "Enter" && !e.shiftKey && !isLoading && !emailPromptActive) {
                   e.preventDefault();
                   handleSend();
                 }
               }}
-              disabled={isLoading}
+              disabled={isLoading || emailPromptActive}
             />
             <button
               className="send-btn"
               onClick={() => handleSend()}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || emailPromptActive}
             >
               <svg viewBox="0 0 24 24" width="22" height="22">
                 <path

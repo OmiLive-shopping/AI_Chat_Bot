@@ -380,3 +380,16 @@ textarea:disabled {
   background-color: #eee;
 }
 
+/* Beta badge styling */
+.beta-badge {
+  position: relative;
+  top: -8px;
+  margin-left: 6px;
+  background-color: #facc15; /* yellow-500 */
+  color: black;
+  font-size: 9px;
+  font-weight: bold;
+  padding: 2px 4px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
