@@ -1,36 +1,36 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import ChatMessage from "./ChatMessage";
 
 const BASE_URL = "https://omi-backend-355024965259.us-central1.run.app";
-
-// NOTE: The client-side getSessionId function has been removed.
-// The server will now generate and manage the session token.
 
 export default function ChatPopup({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [email, setEmail] = useState(localStorage.getItem("userEmail") || "");
-  const [emailSubmitted, setEmailSubmitted] = useState(
-    !!localStorage.getItem("userEmail")
-  );
+  const [emailSubmitted, setEmailSubmitted] = useState(!!localStorage.getItem("userEmail"));
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-
-  // --- NEW: State to hold the session token provided by the backend ---
-  const [sessionToken, setSessionToken] = useState(null);
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // All useEffect hooks remain unchanged.
+  // Initialize messages
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
         {
           type: "bot",
-          text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨ I'm here to help you discover sustainable brands, learn eco tips, and master live shopping - whether you're a conscious shopper or a creator ready to go live! Ask me about: 🛍️ Sustainable shopping & green living tips 📱 Live shopping experiences & authentic brand connections 🌿 Eco-friendly brands & sustainability insights 🎯 Creator resources - Get our free step-by-step live shopping workbook! Ready to chat about conscious commerce? What can I help you with today? 🎉`,
+          text: `Hi there! I'm Omi, your eco-friendly shopping companion! 🌱✨ I'm here to help you discover sustainable brands, learn eco tips, and master live shopping — whether you're a conscious shopper or a creator ready to go live! 
+          
+Ask me about: 
+🛍️ Sustainable shopping & green living tips 
+📱 Live shopping experiences & authentic brand connections 
+🌿 Eco-friendly brands & sustainability insights 
+🎯 Creator resources - Get our free step-by-step live shopping workbook! 
+          
+Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         },
         {
           type: "bot",
@@ -40,6 +40,7 @@ export default function ChatPopup({ onClose }) {
     }
   }, []);
 
+  // Auto-trigger onboarding
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (messages.length === 2 && lastMessage?.type === "bot") {
@@ -48,18 +49,21 @@ export default function ChatPopup({ onClose }) {
     }
   }, [messages.length]);
 
+  // Auto-resize textarea
   useEffect(() => {
     if (!textareaRef.current) return;
     textareaRef.current.style.height = "auto";
-    textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
+    textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
   }, [input]);
 
+  // Auto-focus input when appropriate
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
     }
   }, [isLoading, messages, showOnboarding]);
 
+  // Stop scroll interval
   const stopContinuousScrolling = () => {
     if (scrollIntervalRef.current) {
       clearInterval(scrollIntervalRef.current);
@@ -67,6 +71,7 @@ export default function ChatPopup({ onClose }) {
     }
   };
 
+  // Auto-scroll to bottom on new message
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTo({
@@ -77,12 +82,11 @@ export default function ChatPopup({ onClose }) {
     return () => stopContinuousScrolling();
   }, [messages]);
 
+  // Handle message sending
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
-    const message =
-      typeof messageOverride === "string" ? messageOverride : input.trim();
+    const message = typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
-    // NOTE: sessionId is no longer generated here.
     const isOnboardingPing = message === "__GET_ONBOARDING__";
     setIsLoading(true);
 
@@ -104,12 +108,11 @@ export default function ChatPopup({ onClose }) {
     }
 
     try {
-      // --- MODIFIED: The request now sends the session token ---
       const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message, session_token: sessionToken }),
-        // --- REMOVED: `credentials: "include"` is for cookies, not tokens ---
+        body: JSON.stringify({ message }),
+        credentials: "include",
       });
 
       if (isOnboardingPing) {
@@ -117,35 +120,29 @@ export default function ChatPopup({ onClose }) {
         setIsLoading(false);
         return;
       }
+
       if (!res.body) {
-        // This fallback logic is preserved.
         const data = await res.json().catch(() => ({}));
         const finalAnswer =
-          (data && (data.answer || data.data || data.response)) ||
-          "I'm having a little trouble right now.";
+          data?.answer || data?.data || data?.response || "I'm having a little trouble right now.";
+
         setMessages((prev) => {
-          const updated = prev.filter(
-            (msg) => msg.text !== "OmiBot is thinking..."
-          );
-          return [ ...updated, { type: "bot", text: finalAnswer, loading: false }];
+          const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
+          return [...updated, { type: "bot", text: finalAnswer, loading: false, streaming: false }];
         });
         return;
       }
 
-      // The rest of your streaming logic is preserved.
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let botMessage = "";
+      let fullChunk = "";
 
       setMessages((prev) => {
         const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
-        return [
-          ...updated,
-          { type: "bot", text: "", loading: true, streaming: true },
-        ];
+        return [...updated, { type: "bot", text: "", loading: true, streaming: true }];
       });
 
-      let fullChunk = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -154,53 +151,30 @@ export default function ChatPopup({ onClose }) {
 
         try {
           const parsed = JSON.parse(fullChunk);
-          // Your existing logic for parsing the answer
-          if (parsed.answer) {
-            botMessage = parsed.answer;
-          } else if (parsed.data) {
-            botMessage = parsed.data;
-          } else {
-            botMessage = fullChunk;
-          }
-          // --- NEW: Check for and save the session token from the final response ---
-          if (parsed.session_token) {
-            setSessionToken(parsed.session_token);
-          }
-        } catch (e) {
+          botMessage = parsed.answer || parsed.data || fullChunk;
+        } catch {
           botMessage = fullChunk;
         }
 
         setMessages((prev) => {
           const updated = [...prev];
           const lastIndex = updated.length - 1;
-          if (
-            lastIndex >= 0 &&
-            updated[lastIndex].type === "bot" &&
-            updated[lastIndex].streaming
-          ) {
-            updated[lastIndex] = {
-              ...updated[lastIndex],
-              text: botMessage,
-              loading: true,
-            };
+          if (lastIndex >= 0 && updated[lastIndex].type === "bot" && updated[lastIndex].streaming) {
+            updated[lastIndex] = { ...updated[lastIndex], text: botMessage, loading: true };
           }
           return updated;
         });
       }
     } catch (err) {
       console.error("Fetch error:", err);
-      // Your error handling logic is preserved.
       setMessages((prev) => {
-        const updated = prev.filter(
-          (msg) => msg.text !== "OmiBot is thinking..."
-        );
+        const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
         return [
           ...updated,
-          { type: "bot", text: `⚠️ Error: Could not connect to the server.`, loading: false },
+          { type: "bot", text: "⚠️ Error: Could not connect to the server.", loading: false },
         ];
       });
     } finally {
-      // Your cleanup logic is preserved.
       stopContinuousScrolling();
       setMessages((prev) => {
         const updated = [...prev];
@@ -215,7 +189,7 @@ export default function ChatPopup({ onClose }) {
     }
   };
 
-  // The handleEmailSubmit function is unchanged.
+  // Handle email submission
   const handleEmailSubmit = async () => {
     const trimmed = email.trim();
     const isValid = /\S+@\S+\.\S+/.test(trimmed);
@@ -226,7 +200,7 @@ export default function ChatPopup({ onClose }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: trimmed }),
-        // You might want to remove credentials:include here too if not needed
+        credentials: "include",
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
@@ -236,13 +210,12 @@ export default function ChatPopup({ onClose }) {
     }
   };
 
-  // The handleEmailReject function is unchanged.
+  // Handle email rejection
   const handleEmailReject = () => {
     setSessionDismissed(true);
     handleSend("no thanks", true, { suppressThinking: false });
   };
 
-  // The rest of your component's JSX and logic is unchanged.
   return (
     <div id="chat-popup">
       <header className="chat-header">
@@ -252,8 +225,6 @@ export default function ChatPopup({ onClose }) {
             className="new-chat-btn"
             onClick={() => {
               localStorage.removeItem("userEmail");
-              // --- MODIFIED: Clear the session token from state ---
-              setSessionToken(null); 
               window.location.reload();
             }}
           >
@@ -268,15 +239,11 @@ export default function ChatPopup({ onClose }) {
       <main className="chat-shell">
         <div className="chat-box" ref={chatBoxRef}>
           {messages.map((msg, idx) => (
-            <ChatMessage
-              key={idx}
-              type={msg.type}
-              text={msg.text}
-              loading={msg.loading}
-            />
+            <ChatMessage key={idx} type={msg.type} text={msg.text} loading={msg.loading} />
           ))}
         </div>
 
+        {/* Email prompt */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) =>
@@ -303,6 +270,7 @@ export default function ChatPopup({ onClose }) {
             </div>
           )}
 
+        {/* Onboarding selection */}
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-buttons">
@@ -333,13 +301,12 @@ export default function ChatPopup({ onClose }) {
             </div>
           </div>
         ) : (
+          // Input bar
           <div className="input-bar">
             <textarea
               ref={textareaRef}
               rows="1"
-              placeholder={
-                isLoading ? "OmiBot is thinking..." : "Ask me something..."
-              }
+              placeholder={isLoading ? "OmiBot is thinking..." : "Ask me something..."}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
