@@ -383,9 +383,9 @@ textarea:disabled {
 .beta-badge {
   background-color: #facc15; /* yellow-400 */
   color: black;
-  font-size: 8px;
+  font-size: 10px;          /* slightly bigger */
   font-weight: bold;
-  padding: 0 4px;
+  padding: 0 5px;           /* a little extra padding */
   border-radius: 4px;
   text-transform: uppercase;
 }
