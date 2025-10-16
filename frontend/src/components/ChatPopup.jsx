@@ -3,6 +3,16 @@ import ChatMessage from "./ChatMessage";
 
 const BASE_URL = "https://omi-backend-355024965259.us-central1.run.app";
 
+// Generate or retrieve persistent session ID
+const getSessionId = () => {
+  let sessionId = localStorage.getItem("omiSessionId");
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem("omiSessionId", sessionId);
+  }
+  return sessionId;
+};
+
 export default function ChatPopup({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -18,7 +28,6 @@ export default function ChatPopup({ onClose }) {
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // Initial greeting: Set two initial messages to be displayed.
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -34,15 +43,12 @@ export default function ChatPopup({ onClose }) {
     }
   }, []);
 
-  // When the two initial messages appear, trigger onboarding and show the buttons.
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     if (messages.length === 2 && lastMessage?.type === "bot") {
-      // send onboarding ping to backend but suppress the local "thinking" placeholder only for this ping
       handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
       setShowOnboarding(true);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
   useEffect(() => {
@@ -74,18 +80,12 @@ export default function ChatPopup({ onClose }) {
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  /**
-   * handleSend
-   * messageOverride: string or undefined -> message to send
-   * isSilent: when true we do not add a user message to the chat UI (used for onboarding & email submits)
-   * opts: { suppressThinking: boolean } to avoid adding the "OmiBot is thinking..." placeholder for some pings
-   */
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message =
       typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
 
-    // Special-case onboarding ping: still call backend to set session state, but avoid local placeholders
+    const sessionId = getSessionId();
     const isOnboardingPing = message === "__GET_ONBOARDING__";
 
     setIsLoading(true);
@@ -95,14 +95,11 @@ export default function ChatPopup({ onClose }) {
     }
     setInput("");
 
-    // Only add the thinking placeholder if not suppressed and this is not the special onboarding ping
     if (!opts.suppressThinking && !isOnboardingPing) {
       setMessages((prev) => [
         ...prev,
         { type: "bot", text: "OmiBot is thinking...", loading: true },
       ]);
-
-      // start auto-scroll
       scrollIntervalRef.current = setInterval(() => {
         if (chatBoxRef.current) {
           chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -114,20 +111,16 @@ export default function ChatPopup({ onClose }) {
       const res = await fetch(`${BASE_URL}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, session_id: sessionId }),
         credentials: "include",
       });
 
-      // If onboarding ping (backend returns empty string intentionally), handle gracefully
       if (isOnboardingPing) {
-        // backend sets session flag and returns empty; we don't need to show any immediate reply
         setShowOnboarding(true);
-        // ensure we stop loading state because we suppressed thinking for onboarding
         setIsLoading(false);
         return;
       }
-
-      if (!res.body) {
+            if (!res.body) {
         const data = await res.json().catch(() => ({}));
         const finalAnswer =
           (data && (data.answer || data.data || data.response)) ||
@@ -164,14 +157,12 @@ export default function ChatPopup({ onClose }) {
         fullChunk += decoder.decode(value, { stream: true });
 
         try {
-          // API may stream newline-separated JSON or raw text; try JSON parse first
           const parsed = JSON.parse(fullChunk);
           if (parsed.answer) {
             botMessage = parsed.answer;
           } else if (parsed.data) {
             botMessage = parsed.data;
           } else {
-            // fallback to fullChunk content
             botMessage = fullChunk;
           }
         } catch (e) {
@@ -240,8 +231,6 @@ export default function ChatPopup({ onClose }) {
       });
       localStorage.setItem("userEmail", trimmed);
       setEmailSubmitted(true);
-      // send email value silently to backend so it can store and reply if needed
-      // ensure thinking placeholder is shown for the backend response
       handleSend(trimmed, true, { suppressThinking: false });
     } catch (err) {
       console.error("Failed to register email:", err);
@@ -249,11 +238,7 @@ export default function ChatPopup({ onClose }) {
   };
 
   const handleEmailReject = () => {
-    // Hide the email UI locally and send the negative response silently to backend.
-    // Do NOT append the "No worries!" message locally to avoid duplication:
-    // backend will respond with "👍 No worries! We'll keep chatting here." and we will render it.
     setSessionDismissed(true);
-    // ensure thinking placeholder is shown for the backend reply
     handleSend("no thanks", true, { suppressThinking: false });
   };
 
@@ -266,6 +251,7 @@ export default function ChatPopup({ onClose }) {
             className="new-chat-btn"
             onClick={() => {
               localStorage.removeItem("userEmail");
+              localStorage.removeItem("omiSessionId");
               window.location.reload();
             }}
           >
@@ -289,7 +275,6 @@ export default function ChatPopup({ onClose }) {
           ))}
         </div>
 
-        {/* Email prompt UI (unchanged logic and regex) */}
         {!emailSubmitted &&
           !sessionDismissed &&
           messages.some((m) =>
@@ -316,13 +301,11 @@ export default function ChatPopup({ onClose }) {
             </div>
           )}
 
-        {/* Onboarding UI: shows only the buttons, as the prompt is now a chat message */}
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-buttons">
               <button
                 onClick={() => {
-                  // send selection silently but show thinking placeholder for backend reply
                   handleSend("Eco Shopper", true, { suppressThinking: false });
                   setShowOnboarding(false);
                 }}

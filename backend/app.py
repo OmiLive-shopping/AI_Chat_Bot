@@ -22,20 +22,25 @@ except ImportError as e:
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-# Configure CORS for Netlify + localhost
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "https://omilivechatbot.netlify.app,http://localhost:3000, https://www.omilive.com")
+# Configure CORS for Netlify + localhost + Wix
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "https://omilivechatbot.netlify.app,http://localhost:3000,https://www.omilive.com")
 CORS(app, origins=[origin.strip() for origin in allowed_origins.split(",") if origin.strip()], supports_credentials=True)
 
 # Secret key for session
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "omi-chatbot-secret-fallback-key")
 
-# --- THIS IS THE FIX ---
-# Secure session cookies, setting SameSite=None for cross-domain contexts
+# Secure session cookies for cross-domain iframe use
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="None", # Changed from "Lax" to "None"
+    SESSION_COOKIE_SAMESITE="None"
 )
+
+# Optional: reinforce credentials support
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 # =========================
 # Routes
@@ -76,7 +81,6 @@ def register_email():
         traceback.print_exc()
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
-
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
@@ -86,13 +90,16 @@ def chat():
         user_input = data.get("message", "").strip()
         if not user_input:
             return jsonify({"answer": "Empty message received"}), 400
-        
-        if 'user_id' not in session:
+
+        # Support token-based session fallback for Safari/Wix
+        session_id = data.get("session_id")
+        if session_id:
+            session['user_id'] = session_id
+        elif 'user_id' not in session:
             session['user_id'] = os.urandom(16).hex()
             print(f"[INFO] New session created with user_id: {session['user_id']}")
 
         answer = get_rag_response(user_input, session['user_id'])
-        
         return jsonify({"answer": answer})
     except Exception as e:
         print(f"[ERROR] in /chat route: {e}")
