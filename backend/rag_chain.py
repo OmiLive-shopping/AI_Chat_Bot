@@ -5,7 +5,7 @@ import difflib
 import traceback
 import warnings
 import random
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Union
 import json
 from collections import Counter
 from datetime import datetime
@@ -146,6 +146,8 @@ class UserSessionManager:
             "waiting_for_email": False, "offered_suggestions": [],
             "email_prompt_denied": False, "workbook_sent": False,
             "email_address": None,  # NEW: Track if email was provided
+            # queued_followup is where we store follow-up message to be returned separately
+            "queued_followup": None,
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -249,7 +251,8 @@ def get_follow_up_suggestion(session_data: dict) -> str:
     suggestion = random.choice(available)
     offered.append(suggestion)
     session_data["offered_suggestions"] = offered
-    return f"\n_Psst... {suggestion}_"
+    # Return suggestion without leading newlines so caller can control spacing
+    return f"Psst... {suggestion}"
 
 # =========================
 # Brand & Workbook Logic
@@ -259,9 +262,6 @@ def _get_workbook_response() -> str:
     Generates the markdown link for the workbook.
     The workbook file must be publicly accessible in a GCS bucket.
     """
-    # !!! IMPORTANT !!!
-    # Ensure 'Live_Sales_Tactical_Workbook.docx' is uploaded to your GCS bucket
-    # and has public read permissions.
     workbook_url = f"https://storage.googleapis.com/{GOOGLE_CLOUD_PROJECT}/{WORKBOOK_FILENAME}"
     return (
         f"✅ Perfect! Your workbook is ready.\n\n"
@@ -290,8 +290,13 @@ def get_brand_ranking_single(brand_name: str) -> str:
     if row.empty: return f"I couldn't find a ranking for '{brand_name}'."
     row = row.iloc[0]
     score = row.get('final_score', 'N/A')
+    # build breakdown with no empty lines
     breakdown_cols = [c for c in df.columns if c not in ['brand_name', 'brand_key', 'final_score']]
-    breakdown = [f"- {col.replace('_', ' ').title()}: {row[col]}" for col in breakdown_cols if col in row and pd.notna(row[col])]
+    breakdown = []
+    for col in breakdown_cols:
+        if col in row and pd.notna(row[col]):
+            label = col.replace('_', ' ').title()
+            breakdown.append(f"- {label}: {row[col]}")
     response = f"🌍 **{row['brand_name']}** — Sustainability score **{score} / 30**."
     if breakdown:
         response += "\n" + "\n".join(breakdown)
@@ -318,12 +323,13 @@ def respond_with_brand_info() -> str:
     if df.empty or 'final_score' not in df.columns:
         return "I don't have brand ranking information right now."
     top_ranked = df.sort_values(by='final_score', ascending=False).head(5)
-    response_lines = ["Sure! Here are some of the top eco-friendly brands we've ranked on a scale of 30:\n"]
+    response_lines = ["Sure! Here are some of the top eco-friendly brands we've ranked on a scale of 30:"]
     for i, row in enumerate(top_ranked.itertuples(), 1):
         response_lines.append(f"{i}. **{row.brand_name}** (Score: {row.final_score})")
     all_brands = sorted(df["brand_name"].dropna().unique())
     response_lines.append("\nI also track: " + ", ".join(all_brands))
-    return "\n".join(response_lines)
+    # Join without extra blank lines between list items
+    return "\n".join([line.strip() for line in response_lines if line is not None])
 
 # =========================
 # Quiz Logic
@@ -377,7 +383,12 @@ def finish_quiz(session_data: dict) -> str:
 # =========================
 # Main Response Generator
 # =========================
-def get_rag_response(question: str, user_id: str) -> str:
+def get_rag_response(question: str, user_id: str) -> Union[str, List[str]]:
+    """
+    Returns either:
+      - str: single message
+      - [str, str]: [main_message, followup_message] when a queued follow-up exists
+    """
     session_data = _session_manager.get_session(user_id)
     raw_q = str(question).strip()
     if not raw_q: return "I don't know."
@@ -429,7 +440,7 @@ def get_rag_response(question: str, user_id: str) -> str:
             session_data['waiting_for_user_classification'] = True
             answer = "Please choose a valid option by clicking one of the buttons below."
         add_suggestion = False
-    
+
     # MODIFIED: Handle email submission to deliver workbook
     elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q):
         session_data['waiting_for_email'] = False
@@ -540,27 +551,34 @@ def get_rag_response(question: str, user_id: str) -> str:
                                 answer = "I'm not sure how to answer that. Could you try rephrasing?"
                             else:
                                 prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-                                answer = get_llm().invoke(prompt).content
+                                try:
+                                    answer = get_llm().invoke(prompt).content
+                                except Exception as e:
+                                    print(f"[ERROR] LLM invoke failed: {e}")
+                                    answer = "I had trouble reaching the language model; please try again."
 
     # --- Final Step: Append newsletter or suggestion ---
-    # This logic remains untouched, as it handles the general newsletter prompt, not the workbook delivery.
-
     should_prompt_email = False
     user_type = session_data.get('user_type')
     response_count = session_data.get('response_count', 0)
 
     if not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
-        if user_type == 'eco_shopper' and response_count == 4:
+        if user_type == 'eco_shopper' and response_count == 5:
             should_prompt_email = True
-        # Don't prompt creators/brands for a general newsletter if they were already in a workbook flow
         elif user_type in ['creator', 'brand_owner'] and not session_data.get('workbook_sent') and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
             should_prompt_email = True
 
+    # If we need to prompt for email, queue follow-up separately instead of merging
     if should_prompt_email:
         session_data['waiting_for_email'] = True
-        answer += ("\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
-                   "What's your email? 🌱")
+        # ensure one blank line separation
+        if answer and not answer.endswith("\n\n"):
+            answer = answer.rstrip() + "\n\n"
+        newsletter_msg = "💫 We're totally vibing! I'd love to keep this going — want to join our exclusive newsletter? What's your email? 🌱"
+        session_data["queued_followup"] = newsletter_msg
         add_suggestion = False
+
+    # Add proactive suggestion (if any)
 
     if add_suggestion:
         follow = get_follow_up_suggestion(session_data)
