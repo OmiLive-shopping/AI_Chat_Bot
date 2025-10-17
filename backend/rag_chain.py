@@ -558,7 +558,7 @@ def get_rag_response(question: str, user_id: str) -> str:
 
     if should_prompt_email:
         session_data['waiting_for_email'] = True
-        answer += ("\n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+        answer += ("\n + \n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
                    "What's your email? 🌱")
         add_suggestion = False
 
