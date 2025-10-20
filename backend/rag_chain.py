@@ -249,7 +249,7 @@ def get_follow_up_suggestion(session_data: dict) -> str:
     suggestion = random.choice(available)
     offered.append(suggestion)
     session_data["offered_suggestions"] = offered
-    return f"\n_Psst... {suggestion}_"
+    return f"\n + \n_Psst... {suggestion}_"
 
 # =========================
 # Brand & Workbook Logic
