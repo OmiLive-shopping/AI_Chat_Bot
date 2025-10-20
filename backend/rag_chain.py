@@ -8,7 +8,7 @@ import random
 from typing import List, Optional, Any
 import json
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -102,9 +102,6 @@ WORKBOOK_KEYWORDS = [
     'sales guide', 'creator guide', 'creator workbook', 'brand workbook'
 ]
 
-# Session expiry threshold (considered a "new session" after this many seconds of inactivity)
-SESSION_EXPIRY_SECONDS = int(os.environ.get("SESSION_EXPIRY_SECONDS", 3600))  # default 1 hour
-
 # =========================
 # User Session Management
 # =========================
@@ -141,23 +138,14 @@ class UserSessionManager:
 
     def _get_default_session(self, user_id: str) -> dict:
         return {
-            "user_id": user_id,
-            "response_count": 0,
-            "current_quiz_session": None,
-            "quiz_answers": [],
-            "waiting_for_quiz_start": False,
-            "waiting_for_rank_confirmation": False,
-            "brand_to_rank": None,
+            "user_id": user_id, "response_count": 0, "current_quiz_session": None,
+            "quiz_answers": [], "waiting_for_quiz_start": False,
+            "waiting_for_rank_confirmation": False, "brand_to_rank": None,
             "waiting_for_workbook_confirmation": False,
-            "waiting_for_user_classification": False,
-            "user_type": None,
-            "waiting_for_email": False,
-            "offered_suggestions": [],
-            "email_prompt_denied": False,
-            "workbook_sent": False,
+            "waiting_for_user_classification": False, "user_type": None,
+            "waiting_for_email": False, "offered_suggestions": [],
+            "email_prompt_denied": False, "workbook_sent": False,
             "email_address": None,  # NEW: Track if email was provided
-            "pending_newsletter_prompt": False,  # NEW: queue the newsletter prompt as separate message
-            "last_active_ts": None,  # ISO timestamp of last activity
             "created_at": firestore.SERVER_TIMESTAMP if self.db else datetime.now().isoformat()
         }
 
@@ -389,55 +377,10 @@ def finish_quiz(session_data: dict) -> str:
 # =========================
 # Main Response Generator
 # =========================
-def _is_new_session(session_data: dict) -> bool:
-    """
-    Determine if this interaction is a 'new session' compared to last_active_ts.
-    We consider it a new session if no last_active_ts exists OR
-    more than SESSION_EXPIRY_SECONDS have passed since last activity.
-    """
-    last_ts = session_data.get("last_active_ts")
-    if not last_ts:
-        return True
-    try:
-        last_dt = datetime.fromisoformat(last_ts)
-    except Exception:
-        return True
-    now = datetime.utcnow()
-    return (now - last_dt).total_seconds() > SESSION_EXPIRY_SECONDS
-
-def _update_last_active(session_data: dict):
-    session_data["last_active_ts"] = datetime.utcnow().isoformat()
-
 def get_rag_response(question: str, user_id: str) -> str:
     session_data = _session_manager.get_session(user_id)
-
-    # --- Detect new session (inactivity) and reset ephemeral bits ---
-    if _is_new_session(session_data):
-        # Reset response_count for a fresh session so 5th-message logic can run again.
-        # Keep persisted fields like email_address and workbook_sent.
-        session_data['response_count'] = 0
-        # Clear any temporary waiting_for_email from previous session
-        session_data['waiting_for_email'] = False
-        # Clear pending_newsletter_prompt (we'll queue it again only when condition meets)
-        session_data['pending_newsletter_prompt'] = False
-        # Reset email_prompt_denied so a new session can be re-prompted if they still have no email.
-        session_data['email_prompt_denied'] = False
-
     raw_q = str(question).strip()
-    if not raw_q:
-        _update_last_active(session_data)
-        _session_manager.update_session(user_id, session_data)
-        return "I don't know."
-
-    # --- If a newsletter prompt was queued to be sent as its own message, send it first ---
-    if session_data.get("pending_newsletter_prompt"):
-        # Clear the queued flag and set waiting_for_email so that the next user reply is handled as email input
-        session_data["pending_newsletter_prompt"] = False
-        session_data["waiting_for_email"] = True
-        _update_last_active(session_data)
-        _session_manager.update_session(user_id, session_data)
-        return ("💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
-                "What's your email? 🌱")
+    if not raw_q: return "I don't know."
 
     answer = ""
     session_data['response_count'] = session_data.get('response_count', 0) + 1
@@ -449,7 +392,6 @@ def get_rag_response(question: str, user_id: str) -> str:
     # --- BLOCK A: Handle special triggers and stateful responses FIRST ---
     if raw_q == "__GET_ONBOARDING__":
         session_data['waiting_for_user_classification'] = True
-        _update_last_active(session_data)
         _session_manager.update_session(user_id, session_data)
         return ""
 
@@ -488,15 +430,11 @@ def get_rag_response(question: str, user_id: str) -> str:
             answer = "Please choose a valid option by clicking one of the buttons below."
         add_suggestion = False
     
-    # Handle email submission (user typed an email)
+    # MODIFIED: Handle email submission to deliver workbook
     elif re.match(r"[^@]+@[^@]+\.[^@]+", raw_q):
         session_data['waiting_for_email'] = False
         session_data['email_address'] = raw_q  # Save email to session
         user_type = session_data.get('user_type')
-
-        # Clear any deferred/denied flags once we have a valid email
-        session_data['email_prompt_denied'] = False
-        session_data['pending_newsletter_prompt'] = False
 
         if user_type in ['creator', 'brand_owner']:
             session_data['workbook_sent'] = True
@@ -543,13 +481,9 @@ def get_rag_response(question: str, user_id: str) -> str:
         session_data.update({"waiting_for_rank_confirmation": False, "brand_to_rank": None})
         add_suggestion = False
 
-    # If user says "no" while we are waiting for email (i.e., they were prompted),
-    # we should not re-ask in this same session, but should allow re-asking in a future session.
-    elif is_negative and session_data.get('waiting_for_email'):
+    elif is_negative_response(raw_q) and session_data.get('waiting_for_email'):
         session_data['email_prompt_denied'] = True
         session_data['waiting_for_email'] = False
-        # We will not set pending_newsletter_prompt here; instead, the flow for future sessions
-        # is controlled by response_count reset on next session. So just acknowledge and defer.
         answer = "👍 No worries! We'll keep chatting here."
         add_suggestion = False
 
@@ -600,25 +534,22 @@ def get_rag_response(question: str, user_id: str) -> str:
                         if not retriever:
                             answer = "My knowledge base is currently unavailable. Please try again later."
                         else:
-                            try:
-                                context_docs = retriever.invoke(raw_q)
-                                context = "\n\n".join(d.page_content for d in context_docs)
-                                if not context.strip():
-                                    answer = "I'm not sure how to answer that. Could you try rephrasing?"
-                                else:
-                                    prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
-                                    answer = get_llm().invoke(prompt).content
-                            except Exception as e:
-                                print(f"[ERROR] retrieval or LLM invoke failed: {e}")
-                                answer = "I had trouble looking that up just now."
+                            context_docs = retriever.invoke(raw_q)
+                            context = "\n\n".join(d.page_content for d in context_docs)
+                            if not context.strip():
+                                answer = "I'm not sure how to answer that. Could you try rephrasing?"
+                            else:
+                                prompt = QA_PROMPT_GENERAL.format(persona=SYSTEM_PERSONA, context=context, question=raw_q)
+                                answer = get_llm().invoke(prompt).content
 
-    # --- Final Step: Decide whether to queue newsletter prompt (as separate message) ---
+    # --- Final Step: Append newsletter or suggestion ---
+    # This logic remains untouched, as it handles the general newsletter prompt, not the workbook delivery.
+
     should_prompt_email = False
     user_type = session_data.get('user_type')
     response_count = session_data.get('response_count', 0)
 
-    # Only consider prompting if user hasn't already given an email and we are not already waiting for email
-    if (not session_data.get('waiting_for_email')) and (not session_data.get('email_address')) and (not session_data.get('email_prompt_denied')):
+    if not session_data.get('waiting_for_email') and not session_data.get('email_prompt_denied'):
         if user_type == 'eco_shopper' and response_count == 5:
             should_prompt_email = True
         # Don't prompt creators/brands for a general newsletter if they were already in a workbook flow
@@ -626,23 +557,16 @@ def get_rag_response(question: str, user_id: str) -> str:
             should_prompt_email = True
 
     if should_prompt_email:
-        # Instead of appending newsletter text in the same response,
-        # queue it to be sent as its own follow-up message on the next get_rag_response call.
-        session_data['pending_newsletter_prompt'] = True
-        # Save that we are not yet waiting_for_email until the queued message is delivered, the queued message will set waiting_for_email=True
-        # Return the normal answer now (5th response), and next call will return the newsletter prompt separately.
-        _update_last_active(session_data)
-        _session_manager.update_session(user_id, session_data)
-        return answer
+        session_data['waiting_for_email'] = True
+        answer += ("\n + \n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+                   "What's your email? 🌱")
+        add_suggestion = False
 
-    # If add_suggestion is still True, append a proactive suggestion not already in answer
     if add_suggestion:
         follow = get_follow_up_suggestion(session_data)
         if follow and follow.strip() not in answer:
             answer += follow
 
-    # Update last active timestamp and persist session
-    _update_last_active(session_data)
     _session_manager.update_session(user_id, session_data)
     return answer
 

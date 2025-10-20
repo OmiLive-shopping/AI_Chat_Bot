@@ -12,25 +12,18 @@ export default function ChatPopup({ onClose }) {
   const [sessionDismissed, setSessionDismissed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [sessionReady, setSessionReady] = useState(false);
 
   const chatBoxRef = useRef(null);
   const textareaRef = useRef(null);
   const scrollIntervalRef = useRef(null);
 
-  // ✅ Initialize session token safely
+  // ✅ Session token (Safari-safe)
   useEffect(() => {
-    async function initSession() {
-      let sessionId = localStorage.getItem("omiSessionId");
-      if (!sessionId) {
-        sessionId = crypto.randomUUID();
-        localStorage.setItem("omiSessionId", sessionId);
-      }
-      // small delay ensures localStorage ready before onboarding ping
-      await new Promise((r) => setTimeout(r, 150));
-      setSessionReady(true);
+    let sessionId = localStorage.getItem("omiSessionId");
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem("omiSessionId", sessionId);
     }
-    initSession();
   }, []);
 
   const getSessionHeaders = () => {
@@ -38,7 +31,7 @@ export default function ChatPopup({ onClose }) {
     return sessionId ? { "X-Session-ID": sessionId } : {};
   };
 
-  // ✅ Initialize greeting messages
+  // ✅ Initialize messages
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
@@ -62,14 +55,14 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   }, []);
 
-  // ✅ Auto-trigger onboarding after messages ready & session ready
+  // ✅ Auto-trigger onboarding
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-    if (sessionReady && messages.length === 2 && lastMessage?.type === "bot") {
+    if (messages.length === 2 && lastMessage?.type === "bot") {
       handleSend("__GET_ONBOARDING__", true, { suppressThinking: true });
       setShowOnboarding(true);
     }
-  }, [messages.length, sessionReady]);
+  }, [messages.length]);
 
   // ✅ Auto-resize textarea
   useEffect(() => {
@@ -78,7 +71,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
   }, [input]);
 
-  // ✅ Focus input when appropriate
+  // ✅ Auto-focus input when appropriate
   useEffect(() => {
     if (textareaRef.current && !showOnboarding) {
       textareaRef.current.focus();
@@ -102,7 +95,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     return () => stopContinuousScrolling();
   }, [messages]);
 
-  // ✅ Main send function
+  // ✅ Unified handleSend (Safari-safe session)
   const handleSend = async (messageOverride, isSilent = false, opts = {}) => {
     const message = typeof messageOverride === "string" ? messageOverride : input.trim();
     if (!message || isLoading) return;
@@ -148,9 +141,10 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         const data = await res.json().catch(() => ({}));
         const finalAnswer =
           data?.answer || data?.data || data?.response || "I'm having a little trouble right now.";
+
         setMessages((prev) => {
           const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
-          return [...updated, { type: "bot", text: finalAnswer, loading: false }];
+          return [...updated, { type: "bot", text: finalAnswer, loading: false, streaming: false }];
         });
         return;
       }
@@ -168,18 +162,21 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+
         fullChunk += decoder.decode(value, { stream: true });
+
         try {
           const parsed = JSON.parse(fullChunk);
           botMessage = parsed.answer || parsed.data || fullChunk;
         } catch {
           botMessage = fullChunk;
         }
+
         setMessages((prev) => {
           const updated = [...prev];
-          const i = updated.length - 1;
-          if (i >= 0 && updated[i].type === "bot" && updated[i].streaming) {
-            updated[i] = { ...updated[i], text: botMessage, loading: true };
+          const lastIndex = updated.length - 1;
+          if (lastIndex >= 0 && updated[lastIndex].type === "bot" && updated[lastIndex].streaming) {
+            updated[lastIndex] = { ...updated[lastIndex], text: botMessage, loading: true };
           }
           return updated;
         });
@@ -197,10 +194,10 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
       stopContinuousScrolling();
       setMessages((prev) => {
         const updated = [...prev];
-        const i = updated.length - 1;
-        if (i >= 0 && updated[i].type === "bot") {
-          updated[i].loading = false;
-          updated[i].streaming = false;
+        const lastIndex = updated.length - 1;
+        if (lastIndex >= 0 && updated[lastIndex].type === "bot") {
+          updated[lastIndex].loading = false;
+          updated[lastIndex].streaming = false;
         }
         return updated;
       });
@@ -208,11 +205,12 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
     }
   };
 
-  // ✅ Email submission
+  // ✅ Email handling
   const handleEmailSubmit = async () => {
     const trimmed = email.trim();
     const isValid = /\S+@\S+\.\S+/.test(trimmed);
     if (!isValid) return alert("Please enter a valid email");
+
     try {
       await fetch(`${BASE_URL}/register-email`, {
         method: "POST",
@@ -239,19 +237,18 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
   const emailPromptActive =
     !emailSubmitted &&
     !sessionDismissed &&
-    messages.some((m) => /drop your email|send.*workbook|what'?s your email/i.test(m.text));
+    messages.some((m) =>
+      /drop your email|send.*workbook|what'?s your email/i.test(m.text)
+    );
 
   return (
     <div id="chat-popup">
       <header className="chat-header">
-        <div className="header-left flex items-center gap-2">
-          <span className="font-semibold">Omi Live</span>
-          <span className="beta-badge-squares">
-            <div className="square" />
-            <div className="square" />
-            <span className="ml-1 text-xs font-medium">Beta</span>
-          </span>
+        <div className="header-left flex items-center gap-1">
+          <span>OmiBot | Omi Live</span>
+          <span className="beta-badge">Beta</span>
         </div>
+
         <div className="chat-header-right">
           <button
             className="new-chat-btn"
