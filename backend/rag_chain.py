@@ -556,11 +556,22 @@ def get_rag_response(question: str, user_id: str) -> str:
         elif user_type in ['creator', 'brand_owner'] and not session_data.get('workbook_sent') and not session_data.get('waiting_for_workbook_confirmation') and response_count == 3:
             should_prompt_email = True
 
+    # === MODIFICATION START ===
+    # This logic now ensures the newsletter prompt is appended as a separate, delimited message.
+    # Your frontend should split the *entire* response string by "\n + \n" to create separate bubbles.
     if should_prompt_email:
         session_data['waiting_for_email'] = True
-        answer += ("\n + \n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
-                   "What's your email? 🌱")
+        
+        newsletter_prompt = ("\n + \n💫 We're totally vibing! I'd love to keep this going - want to join our exclusive newsletter? "
+                             "What's your email? 🌱")
+        
+        # We strip the main 'answer' to prevent extra newlines from breaking the delimiter.
+        # This joins the 5th response and the newsletter prompt with your specific delimiter.
+        answer = answer.strip() + newsletter_prompt
+        
+        # This is crucial: it prevents a *different* suggestion from *also* being added.
         add_suggestion = False
+    # === MODIFICATION END ===
 
     if add_suggestion:
         follow = get_follow_up_suggestion(session_data)
@@ -579,4 +590,11 @@ if __name__ == "__main__":
         user_input = input("\nYou: ").strip()
         if user_input.lower() in ['quit', 'exit']: break
         response = get_rag_response(user_input, cli_session['user_id'])
-        print(f"OMI: {response}")
+        
+        # This mimics how the frontend should split messages
+        messages = response.split("\n + \n")
+        print(f"OMI: {messages[0]}")
+        if len(messages) > 1:
+            for msg in messages[1:]:
+                # In a real UI, this would be a new, separate chat bubble
+                print(f"OMI (Follow-up): {msg}")

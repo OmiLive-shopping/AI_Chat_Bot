@@ -137,6 +137,7 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         return;
       }
 
+      // === MODIFICATION START: Handle non-streaming response + split ===
       if (!res.body) {
         const data = await res.json().catch(() => ({}));
         const finalAnswer =
@@ -144,10 +145,24 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
 
         setMessages((prev) => {
           const updated = prev.filter((msg) => msg.text !== "OmiBot is thinking...");
-          return [...updated, { type: "bot", text: finalAnswer, loading: false, streaming: false }];
+          const parts = finalAnswer.split("\n + \n");
+
+          // Add first part
+          const firstMessage = { type: "bot", text: parts[0], loading: false, streaming: false };
+          
+          // Add any follow-up parts
+          const followUpMessages = parts.slice(1).map(part => ({
+            type: "bot",
+            text: part,
+            loading: false,
+            streaming: false
+          }));
+
+          return [...updated, firstMessage, ...followUpMessages];
         });
-        return;
+        return; // Important: exit function
       }
+      // === MODIFICATION END ===
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -191,17 +206,44 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         ];
       });
     } finally {
+      // === MODIFICATION START: Handle streaming response split ===
       stopContinuousScrolling();
+      setIsLoading(false); // Set this first
+
       setMessages((prev) => {
         const updated = [...prev];
         const lastIndex = updated.length - 1;
-        if (lastIndex >= 0 && updated[lastIndex].type === "bot") {
-          updated[lastIndex].loading = false;
-          updated[lastIndex].streaming = false;
+
+        if (lastIndex < 0 || updated[lastIndex].type !== "bot") {
+          return updated; // Should not happen, but good to check
         }
-        return updated;
+
+        // Get the full message text received from the stream
+        const fullText = updated[lastIndex].text || "";
+        const parts = fullText.split("\n + \n");
+
+        // Update the last message with the first part and stop loading
+        updated[lastIndex] = {
+          ...updated[lastIndex],
+          text: parts[0], // Only the first part
+          loading: false,
+          streaming: false,
+        };
+
+        // Add any subsequent parts as new bot messages
+        if (parts.length > 1) {
+          const followUpMessages = parts.slice(1).map(part => ({
+            type: "bot",
+            text: part,
+            loading: false,
+            streaming: false
+          }));
+          return [...updated, ...followUpMessages];
+        }
+
+        return updated; // Return the updated array
       });
-      setIsLoading(false);
+      // === MODIFICATION END ===
     }
   };
 
@@ -294,30 +336,32 @@ Ready to chat about conscious commerce? What can I help you with today? 🎉`,
         {showOnboarding ? (
           <div className="onboarding-section">
             <div className="onboarding-buttons">
+              {/* === MODIFICATION START: Bug fix (async/await) === */}
               <button
-                onClick={() => {
-                  handleSend("Eco Shopper", true, { suppressThinking: false });
+                onClick={async () => {
+                  await handleSend("Eco Shopper", true, { suppressThinking: false });
                   setShowOnboarding(false);
                 }}
               >
                 Eco Shopper
               </button>
               <button
-                onClick={() => {
-                  handleSend("Creator", true, { suppressThinking: false });
+                onClick={async () => {
+                  await handleSend("Creator", true, { suppressThinking: false });
                   setShowOnboarding(false);
                 }}
               >
                 Creator
               </button>
               <button
-                onClick={() => {
-                  handleSend("Brand Owner", true, { suppressThinking: false });
+                onClick={async () => {
+                  await handleSend("Brand Owner", true, { suppressThinking: false });
                   setShowOnboarding(false);
                 }}
               >
                 Brand Owner
               </button>
+              {/* === MODIFICATION END === */}
             </div>
           </div>
         ) : (
