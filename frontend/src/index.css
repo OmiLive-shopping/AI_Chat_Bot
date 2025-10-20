@@ -381,11 +381,22 @@ textarea:disabled {
 }
 
 .beta-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;                 /* spacing between squares and text */
   background-color: #facc15; /* yellow-400 */
   color: black;
   font-size: 10px;          /* slightly bigger */
   font-weight: bold;
-  padding: 0 5px;           /* a little extra padding */
+  padding: 0 6px;           /* a little extra padding */
   border-radius: 4px;
   text-transform: uppercase;
 }
+
+.beta-badge .square {
+  width: 6px;
+  height: 6px;
+  background-color: #4ade80; /* green tone */
+  border-radius: 2px;
+}
+
