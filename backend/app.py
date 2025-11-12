@@ -28,7 +28,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 # Configure CORS to allow requests from specific origins
 allowed_origins = os.environ.get(
     "ALLOWED_ORIGINS",
-    "https://omilivechatbot.netlify.app,http://localhost:3000,https://www.omilive.com",
+    "https://omilivechatbot.netlify.app,http://localhost:3000,https://www.omilive.com,http://localhost:5173/",
 )
 CORS(
     app,
